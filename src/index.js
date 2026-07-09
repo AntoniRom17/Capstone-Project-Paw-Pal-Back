@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
+import authRouter from "./routes/auth.js";
 
 dotenv.config();
 
@@ -18,14 +19,17 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({
     status: "ok",
     message: "PawPal backend is running",
-    environment: process.env.NODE_ENV || "development"
+    environment: process.env.NODE_ENV || "development",
   });
 });
+
+// Routes
+app.use("/api/auth", authRouter);
 
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
-    error: "Route not found"
+    error: "Route not found",
   });
 });
 
@@ -34,7 +38,7 @@ app.use((err, req, res, next) => {
   console.error(err);
 
   res.status(err.status || 500).json({
-    error: err.message || "Internal server error"
+    error: err.message || "Internal server error",
   });
 });
 
