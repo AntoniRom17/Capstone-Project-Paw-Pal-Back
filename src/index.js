@@ -4,6 +4,7 @@ import morgan from "morgan";
 import dotenv from "dotenv";
 
 import servicesRoutes from "./routes/servicesRoutes.js";
+import servicesRoutes from "./routes/servicesRoutes.js";
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // 404 handler
+app.use("/api/services", servicesRoutes);
 app.use("/api/services", servicesRoutes);
 app.use((req, res) => {
   res.status(404).json({
