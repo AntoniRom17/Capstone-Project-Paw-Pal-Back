@@ -3,6 +3,8 @@ import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
 
+import servicesRoutes from "./routes/servicesRoutes.js";
+
 dotenv.config();
 
 const app = express();
@@ -23,6 +25,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // 404 handler
+app.use("/api/services", servicesRoutes);
 app.use((req, res) => {
   res.status(404).json({
     error: "Route not found"
