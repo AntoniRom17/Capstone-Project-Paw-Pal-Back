@@ -152,3 +152,42 @@ export const getSitterById = async (req, res, next) => {
     next(error);
   }
 };
+
+export const addSitterService = async (req, res, next) => {
+  try {
+    const sitterId = req.user.id;
+    const { serviceId, priceOverride } = req.body;
+
+    if (!serviceId) {
+      return res.status(400).json({
+        error: "serviceId is required"
+      });
+    }
+
+    const result = await query(
+      `
+      WITH inserted AS (
+        INSERT INTO sitter_services (sitter_id, service_id, price_override)
+        VALUES ($1, $2, $3)
+        RETURNING id, sitter_id, service_id, price_override
+      )
+      SELECT
+        inserted.id AS "sitterServiceId",
+        inserted.sitter_id AS "sitterId",
+        inserted.service_id AS "serviceId",
+        s.name,
+        s.description,
+        COALESCE(inserted.price_override, s.base_price) AS price
+      FROM inserted
+      JOIN services s ON s.id = inserted.service_id;
+      `,
+      [sitterId, serviceId, priceOverride ?? null]
+    );
+
+    res.status(201).json({
+      sitterService: result.rows[0]
+    });
+  } catch (error) {
+    next(error);
+  }
+};
