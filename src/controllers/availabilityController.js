@@ -31,3 +31,43 @@ export const getSitterAvailability = async (req, res, next) => {
     next(error);
   }
 };
+
+export const createAvailability = async (req, res, next) => {
+  try {
+    const sitterId = getUserId(req);
+    const { date, startTime, endTime } = req.body;
+
+    if (!date || !startTime || !endTime) {
+      return res.status(400).json({
+        error: "date, startTime, and endTime are required"
+      });
+    }
+
+    const result = await query(
+      `
+      INSERT INTO availability (
+        sitter_id,
+        date,
+        start_time,
+        end_time,
+        is_booked
+      )
+      VALUES ($1, $2, $3, $4, false)
+      RETURNING
+        id,
+        sitter_id AS "sitterId",
+        date,
+        start_time AS "startTime",
+        end_time AS "endTime",
+        is_booked AS "isBooked";
+      `,
+      [sitterId, date, startTime, endTime]
+    );
+
+    res.status(201).json({
+      availability: result.rows[0]
+    });
+  } catch (error) {
+    next(error);
+  }
+};
