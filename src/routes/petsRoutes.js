@@ -4,9 +4,9 @@ import {
   createPet,
   getPetById,
   updatePet,
-  deletePet
+  deletePet,
 } from "../controllers/petsController.js";
-import { requireAuth, requireRole } from "../middleware/authMiddleware.js";
+import { requireAuth, requireRole } from "../middleware/auth.js";
 
 const router = Router();
 
