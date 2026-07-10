@@ -8,6 +8,7 @@ import servicesRoutes from "./routes/servicesRoutes.js";
 import sittersRoutes from "./routes/sittersRoutes.js";
 import petsRoutes from "./routes/petsRoutes.js";
 import availabilityRoutes from "./routes/availabilityRoutes.js";
+import bookingRoutes from "./routes/bookingRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -33,6 +34,7 @@ app.use("/api/services", servicesRoutes);
 app.use("/api/sitters", sittersRoutes);
 app.use("/api/pets", petsRoutes);
 app.use("/api", availabilityRoutes);
+app.use("/api/bookings", bookingRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
