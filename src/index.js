@@ -3,6 +3,7 @@ import cors from "cors";
 import morgan from "morgan";
 import dotenv from "dotenv";
 
+import petsRoutes from "./routes/petsRoutes.js";
 import servicesRoutes from "./routes/servicesRoutes.js";
 import servicesRoutes from "./routes/servicesRoutes.js";
 
@@ -27,7 +28,8 @@ app.get("/api/health", (req, res) => {
 
 // 404 handler
 app.use("/api/services", servicesRoutes);
-app.use("/api/services", servicesRoutes);
+app.use("/api/sitters", sittersRoutes);
+app.use("/api/pets", petsRoutes);
 app.use((req, res) => {
   res.status(404).json({
     error: "Route not found"
