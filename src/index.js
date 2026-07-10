@@ -9,6 +9,7 @@ import sittersRoutes from "./routes/sittersRoutes.js";
 import petsRoutes from "./routes/petsRoutes.js";
 import availabilityRoutes from "./routes/availabilityRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
+import reviewsRoutes from "./routes/reviewsRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,6 +36,7 @@ app.use("/api/sitters", sittersRoutes);
 app.use("/api/pets", petsRoutes);
 app.use("/api", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
+app.use("/api/reviews", reviewsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
