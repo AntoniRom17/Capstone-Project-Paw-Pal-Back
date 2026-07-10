@@ -4,6 +4,11 @@ import morgan from "morgan";
 import dotenv from "dotenv";
 import authRouter from "./routes/auth.js";
 
+import petsRoutes from "./routes/petsRoutes.js";
+import servicesRoutes from "./routes/servicesRoutes.js";
+import servicesRoutes from "./routes/servicesRoutes.js";
+import availabilityRoutes from "./routes/availabilityRoutes.js";
+
 dotenv.config();
 
 const app = express();
@@ -27,6 +32,11 @@ app.get("/api/health", (req, res) => {
 app.use("/api/auth", authRouter);
 
 // 404 handler
+app.use("/api/services", servicesRoutes);
+app.use("/api/sitters", sittersRoutes);
+app.use("/api/pets", petsRoutes);
+app.use("/api", availabilityRoutes);
+
 app.use((req, res) => {
   res.status(404).json({
     error: "Route not found",
