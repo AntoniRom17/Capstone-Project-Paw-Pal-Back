@@ -1,4 +1,4 @@
-import { query } from "../db/client.js";
+import { pool, query } from "../db/client.js";
 
 function mapBooking(row) {
   return {
@@ -22,6 +22,8 @@ function mapBooking(row) {
 
 // POST /api/bookings - owner requests a booking from an availability slot
 export async function createBooking(req, res, next) {
+  const client = await pool.connect();
+
   try {
     const { sitterId, petId, sitterServiceId, availabilityId } = req.body;
 
@@ -32,16 +34,19 @@ export async function createBooking(req, res, next) {
       });
     }
 
-    const { rows: petRows } = await query(
+    await client.query("BEGIN");
+
+    const { rows: petRows } = await client.query(
       `SELECT id FROM pets WHERE id = $1 AND owner_id = $2`,
       [petId, req.user.id],
     );
 
     if (!petRows[0]) {
+      await client.query("ROLLBACK");
       return res.status(403).json({ error: "That pet does not belong to you" });
     }
 
-    const { rows: slotRows } = await query(
+    const { rows: slotRows } = await client.query(
       `SELECT id, date, start_time, end_time, is_booked
        FROM availability
        WHERE id = $1 AND sitter_id = $2`,
@@ -51,16 +56,18 @@ export async function createBooking(req, res, next) {
     const slot = slotRows[0];
 
     if (!slot) {
+      await client.query("ROLLBACK");
       return res.status(404).json({
         error: "Availability slot not found for that sitter",
       });
     }
 
     if (slot.is_booked) {
+      await client.query("ROLLBACK");
       return res.status(400).json({ error: "That slot is already booked" });
     }
 
-    const { rows: serviceRows } = await query(
+    const { rows: serviceRows } = await client.query(
       `SELECT
          ss.id AS "sitterServiceId",
          COALESCE(ss.price_override, s.base_price) AS price
@@ -73,12 +80,13 @@ export async function createBooking(req, res, next) {
     const sitterService = serviceRows[0];
 
     if (!sitterService) {
+      await client.query("ROLLBACK");
       return res.status(404).json({
         error: "Sitter service not found for that sitter",
       });
     }
 
-    const { rows } = await query(
+    const { rows } = await client.query(
       `INSERT INTO bookings (
          owner_id,
          sitter_id,
@@ -117,15 +125,20 @@ export async function createBooking(req, res, next) {
       ],
     );
 
-    await query(`UPDATE availability SET is_booked = true WHERE id = $1`, [
+    await client.query(`UPDATE availability SET is_booked = true WHERE id = $1`, [
       availabilityId,
     ]);
+
+    await client.query("COMMIT");
 
     res.status(201).json({
       booking: mapBooking(rows[0]),
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     next(err);
+  } finally {
+    client.release();
   }
 }
 
