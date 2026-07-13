@@ -1,5 +1,25 @@
 import { query } from "../db/client.js";
 
+function mapBooking(row) {
+  return {
+    id: row.id,
+    ownerId: row.ownerId,
+    sitterId: row.sitterId,
+    petId: row.petId,
+    sitterServiceId: row.sitterServiceId,
+    availabilityId: row.availabilityId,
+    status: row.status,
+    totalPrice: row.totalPrice,
+    date: row.date,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    petName: row.petName,
+    ownerName: row.ownerName,
+    sitterName: row.sitterName,
+    serviceName: row.serviceName,
+  };
+}
+
 // POST /api/bookings - owner requests a booking from an availability slot
 export async function createBooking(req, res, next) {
   try {
@@ -42,7 +62,7 @@ export async function createBooking(req, res, next) {
 
     const { rows: serviceRows } = await query(
       `SELECT
-         ss.id AS sitter_service_id,
+         ss.id AS "sitterServiceId",
          COALESCE(ss.price_override, s.base_price) AS price
        FROM sitter_services ss
        JOIN services s ON s.id = ss.service_id
@@ -72,7 +92,18 @@ export async function createBooking(req, res, next) {
          total_price
        )
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
-       RETURNING *`,
+       RETURNING
+         id,
+         owner_id AS "ownerId",
+         sitter_id AS "sitterId",
+         pet_id AS "petId",
+         sitter_service_id AS "sitterServiceId",
+         availability_id AS "availabilityId",
+         status,
+         total_price AS "totalPrice",
+         date,
+         start_time AS "startTime",
+         end_time AS "endTime"`,
       [
         req.user.id,
         sitterId,
@@ -90,7 +121,9 @@ export async function createBooking(req, res, next) {
       availabilityId,
     ]);
 
-    res.status(201).json(rows[0]);
+    res.status(201).json({
+      booking: mapBooking(rows[0]),
+    });
   } catch (err) {
     next(err);
   }
@@ -129,7 +162,9 @@ export async function getBookings(req, res, next) {
       [req.user.id],
     );
 
-    res.status(200).json(rows);
+    res.status(200).json({
+      bookings: rows.map(mapBooking),
+    });
   } catch (err) {
     next(err);
   }
