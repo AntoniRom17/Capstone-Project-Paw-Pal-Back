@@ -102,16 +102,28 @@ export async function getBookings(req, res, next) {
     const column = req.user.role === "sitter" ? "b.sitter_id" : "b.owner_id";
 
     const { rows } = await query(
-      `SELECT b.id, b.date, b.start_time, b.end_time, b.status, b.total_price,
-              p.name AS pet_name,
-              o.name AS owner_name,
-              si.name AS sitter_name,
-              s.name AS service_name
+      `SELECT
+         b.id,
+         b.owner_id AS "ownerId",
+         b.sitter_id AS "sitterId",
+         b.pet_id AS "petId",
+         b.sitter_service_id AS "sitterServiceId",
+         b.availability_id AS "availabilityId",
+         b.date,
+         b.start_time AS "startTime",
+         b.end_time AS "endTime",
+         b.status,
+         b.total_price AS "totalPrice",
+         p.name AS "petName",
+         o.name AS "ownerName",
+         si.name AS "sitterName",
+         s.name AS "serviceName"
        FROM bookings b
        JOIN pets p ON p.id = b.pet_id
        JOIN users o ON o.id = b.owner_id
        JOIN users si ON si.id = b.sitter_id
-       JOIN services s ON s.id = b.service_id
+       JOIN sitter_services ss ON ss.id = b.sitter_service_id
+       JOIN services s ON s.id = ss.service_id
        WHERE ${column} = $1
        ORDER BY b.date DESC, b.start_time DESC`,
       [req.user.id],
