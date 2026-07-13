@@ -40,45 +40,49 @@ export async function createBooking(req, res, next) {
       return res.status(400).json({ error: "That slot is already booked" });
     }
 
-    const { rows: priceRows } = await query(
-      `SELECT COALESCE(ss.price_override, s.base_price) AS price
+    const { rows: serviceRows } = await query(
+      `SELECT
+         ss.id AS sitter_service_id,
+         COALESCE(ss.price_override, s.base_price) AS price
        FROM sitter_services ss
        JOIN services s ON s.id = ss.service_id
        WHERE ss.id = $1 AND ss.sitter_id = $2`,
       [sitterServiceId, sitterId],
     );
 
-    if (!priceRows[0]) {
+    const sitterService = serviceRows[0];
+
+    if (!sitterService) {
       return res.status(404).json({
         error: "Sitter service not found for that sitter",
       });
     }
-
-    const price = priceRows[0].price;
 
     const { rows } = await query(
       `INSERT INTO bookings (
          owner_id,
          sitter_id,
          pet_id,
-         service_id,
+         sitter_service_id,
+         availability_id,
          date,
          start_time,
          end_time,
          status,
          total_price
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
        RETURNING *`,
       [
         req.user.id,
         sitterId,
         petId,
         sitterServiceId,
+        availabilityId,
         slot.date,
         slot.start_time,
         slot.end_time,
-        price,
+        sitterService.price,
       ],
     );
 
