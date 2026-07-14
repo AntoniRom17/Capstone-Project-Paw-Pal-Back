@@ -20,6 +20,10 @@ function mapBooking(row) {
   };
 }
 
+function shouldAvailabilityBeBooked(status) {
+  return ["pending", "accepted", "completed"].includes(status);
+}
+
 // POST /api/bookings - owner requests a booking from an availability slot
 export async function createBooking(req, res, next) {
   const client = await pool.connect();
@@ -186,18 +190,23 @@ export async function getBookings(req, res, next) {
 
 // PATCH /api/bookings/:id/status - the state machine
 export async function updateBookingStatus(req, res, next) {
+  const client = await pool.connect();
+
   try {
     const { id } = req.params;
     const { status } = req.body;
 
-    const { rows: bookingRows } = await query(
-      `SELECT * FROM bookings WHERE id = $1`,
+    await client.query("BEGIN");
+
+    const { rows: bookingRows } = await client.query(
+      `SELECT * FROM bookings WHERE id = $1 FOR UPDATE`,
       [id],
     );
 
     const booking = bookingRows[0];
 
     if (!booking) {
+      await client.query("ROLLBACK");
       return res.status(404).json({ error: "Booking not found" });
     }
 
@@ -210,6 +219,7 @@ export async function updateBookingStatus(req, res, next) {
       !(isSitter && sitterMoves.includes(status)) &&
       !(isOwner && ownerMoves.includes(status))
     ) {
+      await client.query("ROLLBACK");
       return res.status(403).json({
         error: "You cannot set that status on this booking",
       });
@@ -223,18 +233,51 @@ export async function updateBookingStatus(req, res, next) {
     const legalNext = allowedTransitions[booking.status] || [];
 
     if (!legalNext.includes(status)) {
+      await client.query("ROLLBACK");
       return res.status(400).json({
         error: `Cannot go from '${booking.status}' to '${status}'`,
       });
     }
 
-    const { rows } = await query(
-      `UPDATE bookings SET status = $1 WHERE id = $2 RETURNING *`,
+    await client.query(`SELECT id FROM availability WHERE id = $1 FOR UPDATE`, [
+      booking.availability_id,
+    ]);
+
+    const { rows } = await client.query(
+      `UPDATE bookings
+       SET status = $1
+       WHERE id = $2
+       RETURNING
+         id,
+         owner_id AS "ownerId",
+         sitter_id AS "sitterId",
+         pet_id AS "petId",
+         sitter_service_id AS "sitterServiceId",
+         availability_id AS "availabilityId",
+         status,
+         total_price AS "totalPrice",
+         date,
+         start_time AS "startTime",
+         end_time AS "endTime"`,
       [status, id],
     );
 
-    res.status(200).json(rows[0]);
+    await client.query(
+      `UPDATE availability
+       SET is_booked = $1
+       WHERE id = $2`,
+      [shouldAvailabilityBeBooked(status), booking.availability_id],
+    );
+
+    await client.query("COMMIT");
+
+    res.status(200).json({
+      booking: mapBooking(rows[0]),
+    });
   } catch (err) {
+    await client.query("ROLLBACK");
     next(err);
+  } finally {
+    client.release();
   }
 }
