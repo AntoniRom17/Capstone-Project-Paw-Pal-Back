@@ -10,6 +10,7 @@ import petsRoutes from "./routes/petsRoutes.js";
 import availabilityRoutes from "./routes/availabilityRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import reviewsRoutes from "./routes/reviewsRoutes.js";
+import messagesRoutes from "./routes/messagesRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,6 +20,7 @@ app.use(
     origin: process.env.CLIENT_URL || "http://localhost:5173",
   }),
 );
+
 app.use(express.json());
 app.use(morgan("dev"));
 
@@ -37,6 +39,7 @@ app.use("/api/pets", petsRoutes);
 app.use("/api", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/reviews", reviewsRoutes);
+app.use("/api/messages", messagesRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
