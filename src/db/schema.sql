@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS reviews CASCADE;
 DROP TABLE IF EXISTS bookings CASCADE;
 DROP TABLE IF EXISTS availability CASCADE;
@@ -121,6 +122,23 @@ CREATE TABLE reviews (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE messages (
+  id SERIAL PRIMARY KEY,
+  booking_id INTEGER NOT NULL
+    REFERENCES bookings(id) ON DELETE CASCADE,
+  sender_id INTEGER NOT NULL
+    REFERENCES users(id),
+  recipient_id INTEGER NOT NULL
+    REFERENCES users(id),
+  body TEXT NOT NULL
+    CHECK (
+      CHAR_LENGTH(BTRIM(body)) BETWEEN 1 AND 2000
+    ),
+  read_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (sender_id <> recipient_id)
+);
+
 CREATE INDEX idx_users_sitter_location
   ON users (role, city, state, zip_code);
 
@@ -142,3 +160,10 @@ CREATE INDEX idx_bookings_sitter_id
 CREATE UNIQUE INDEX idx_one_active_booking_per_availability
   ON bookings (availability_id)
   WHERE status IN ('accepted', 'completed');
+
+CREATE INDEX idx_messages_booking_created_at
+  ON messages (booking_id, created_at, id);
+
+CREATE INDEX idx_messages_unread_recipient
+  ON messages (recipient_id, created_at)
+  WHERE read_at IS NULL;
