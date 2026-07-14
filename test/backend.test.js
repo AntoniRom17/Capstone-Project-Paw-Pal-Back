@@ -16,15 +16,18 @@ if (!process.env.JWT_SECRET) {
 let server;
 
 async function request(path, options = {}) {
+  const { headers = {}, ...requestOptions } = options;
+
   const response = await fetch(`${server.baseUrl}${path}`, {
+    ...requestOptions,
     headers: {
       "Content-Type": "application/json",
-      ...(options.headers || {}),
+      ...headers,
     },
-    ...options,
   });
 
-  const body = await response.json();
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
 
   return {
     status: response.status,
