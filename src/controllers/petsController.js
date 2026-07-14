@@ -4,6 +4,10 @@ const getUserId = (req) => {
   return req.user.id || req.user.userId;
 };
 
+const optionalValue = (value) => {
+  return value === undefined ? null : value;
+};
+
 export const getPets = async (req, res, next) => {
   try {
     const ownerId = getUserId(req);
@@ -23,11 +27,11 @@ export const getPets = async (req, res, next) => {
       WHERE owner_id = $1
       ORDER BY id DESC;
       `,
-      [ownerId]
+      [ownerId],
     );
 
     res.json({
-      pets: result.rows
+      pets: result.rows,
     });
   } catch (error) {
     next(error);
@@ -41,7 +45,7 @@ export const createPet = async (req, res, next) => {
 
     if (!name || !species) {
       return res.status(400).json({
-        error: "name and species are required"
+        error: "name and species are required",
       });
     }
 
@@ -67,11 +71,19 @@ export const createPet = async (req, res, next) => {
         care_notes AS "careNotes",
         photo_url AS "photoUrl";
       `,
-      [ownerId, name, species, breed || null, age || null, careNotes || null, photoUrl || null]
+      [
+        ownerId,
+        name,
+        species,
+        optionalValue(breed),
+        optionalValue(age),
+        optionalValue(careNotes),
+        optionalValue(photoUrl),
+      ],
     );
 
     res.status(201).json({
-      pet: result.rows[0]
+      pet: result.rows[0],
     });
   } catch (error) {
     next(error);
@@ -97,17 +109,17 @@ export const getPetById = async (req, res, next) => {
       FROM pets
       WHERE id = $1 AND owner_id = $2;
       `,
-      [id, ownerId]
+      [id, ownerId],
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
-        error: "Pet not found"
+        error: "Pet not found",
       });
     }
 
     res.json({
-      pet: result.rows[0]
+      pet: result.rows[0],
     });
   } catch (error) {
     next(error);
@@ -141,17 +153,17 @@ export const updatePet = async (req, res, next) => {
         care_notes AS "careNotes",
         photo_url AS "photoUrl";
       `,
-      [name, species, breed, age, careNotes, photoUrl, id, ownerId]
+      [name, species, breed, age, careNotes, photoUrl, id, ownerId],
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
-        error: "Pet not found"
+        error: "Pet not found",
       });
     }
 
     res.json({
-      pet: result.rows[0]
+      pet: result.rows[0],
     });
   } catch (error) {
     next(error);
@@ -169,17 +181,17 @@ export const deletePet = async (req, res, next) => {
       WHERE id = $1 AND owner_id = $2
       RETURNING id;
       `,
-      [id, ownerId]
+      [id, ownerId],
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
-        error: "Pet not found"
+        error: "Pet not found",
       });
     }
 
     res.json({
-      message: "Pet deleted successfully"
+      message: "Pet deleted successfully",
     });
   } catch (error) {
     next(error);
