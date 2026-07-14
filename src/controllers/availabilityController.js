@@ -76,6 +76,8 @@ export const getSitterAvailability = async (req, res, next) => {
         is_booked AS "isBooked"
       FROM availability
       WHERE sitter_id = $1
+        AND date >= CURRENT_DATE
+        AND is_booked = false
       ORDER BY date ASC, start_time ASC;
       `,
       [id],
