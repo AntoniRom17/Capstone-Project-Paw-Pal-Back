@@ -49,7 +49,8 @@ export async function createBooking(req, res, next) {
     const { rows: slotRows } = await client.query(
       `SELECT id, date, start_time, end_time, is_booked
        FROM availability
-       WHERE id = $1 AND sitter_id = $2`,
+       WHERE id = $1 AND sitter_id = $2
+       FOR UPDATE`,
       [availabilityId, sitterId],
     );
 
