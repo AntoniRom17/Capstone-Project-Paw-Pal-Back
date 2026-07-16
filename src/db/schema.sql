@@ -148,6 +148,7 @@ CREATE TABLE reviews (
     REFERENCES users(id),
   rating INTEGER NOT NULL
     CHECK (rating BETWEEN 1 AND 5),
+  was_on_time BOOLEAN,
   comment TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
