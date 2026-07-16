@@ -1,15 +1,21 @@
-import { query } from "../db/client.js";
+import { pool } from "../db/client.js";
 import {
   isPlainObject,
   parseNumber,
   parsePositiveInteger,
 } from "../utils/validation.js";
+import {
+  recalculateSitterTrustMetrics,
+} from "../utils/trustMetrics.js";
 
 export const createReview = async (
   req,
   res,
   next,
 ) => {
+  let client;
+  let transactionStarted = false;
+
   try {
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
@@ -23,6 +29,7 @@ export const createReview = async (
     const {
       bookingId,
       rating,
+      wasOnTime,
       comment,
     } = req.body;
 
@@ -63,12 +70,24 @@ export const createReview = async (
     }
 
     if (
+      wasOnTime !== undefined &&
+      wasOnTime !== null &&
+      typeof wasOnTime !== "boolean"
+    ) {
+      return res.status(400).json({
+        error:
+          "wasOnTime must be a boolean or null",
+      });
+    }
+
+    if (
       comment !== undefined &&
       comment !== null &&
       typeof comment !== "string"
     ) {
       return res.status(400).json({
-        error: "comment must be a string or null",
+        error:
+          "comment must be a string or null",
       });
     }
 
@@ -82,7 +101,23 @@ export const createReview = async (
       });
     }
 
-    const bookingResult = await query(
+    const normalizedWasOnTime =
+      typeof wasOnTime === "boolean"
+        ? wasOnTime
+        : null;
+
+    const normalizedComment =
+      typeof comment === "string" &&
+      comment.trim()
+        ? comment.trim()
+        : null;
+
+    client = await pool.connect();
+
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const bookingResult = await client.query(
       `
       SELECT
         id,
@@ -90,12 +125,16 @@ export const createReview = async (
         sitter_id AS "sitterId",
         status
       FROM bookings
-      WHERE id = $1;
+      WHERE id = $1
+      FOR UPDATE;
       `,
       [numericBookingId],
     );
 
     if (bookingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
       return res.status(404).json({
         error: "Booking not found",
       });
@@ -104,55 +143,61 @@ export const createReview = async (
     const booking = bookingResult.rows[0];
 
     if (booking.ownerId !== ownerId) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
       return res.status(404).json({
         error: "Booking not found",
       });
     }
 
     if (booking.status !== "completed") {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
       return res.status(400).json({
         error:
           "Only completed bookings can be reviewed",
       });
     }
 
-    const existingReview = await query(
-      `
-      SELECT id
-      FROM reviews
-      WHERE booking_id = $1;
-      `,
-      [numericBookingId],
-    );
+    const existingReview =
+      await client.query(
+        `
+        SELECT id
+        FROM reviews
+        WHERE booking_id = $1;
+        `,
+        [numericBookingId],
+      );
 
     if (existingReview.rows.length > 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
       return res.status(409).json({
         error:
           "This booking has already been reviewed",
       });
     }
 
-    const normalizedComment =
-      typeof comment === "string" &&
-      comment.trim()
-        ? comment.trim()
-        : null;
-
-    const result = await query(
+    const result = await client.query(
       `
       WITH inserted AS (
         INSERT INTO reviews (
           booking_id,
           reviewer_id,
           rating,
+          was_on_time,
           comment
         )
-        VALUES ($1, $2, $3, $4)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING
           id,
           booking_id,
           reviewer_id,
           rating,
+          was_on_time,
           comment,
           created_at
       )
@@ -162,6 +207,7 @@ export const createReview = async (
         inserted.reviewer_id AS "reviewerId",
         bookings.sitter_id AS "sitterId",
         inserted.rating,
+        inserted.was_on_time AS "wasOnTime",
         inserted.comment,
         inserted.created_at AS "createdAt"
       FROM inserted
@@ -172,14 +218,33 @@ export const createReview = async (
         numericBookingId,
         ownerId,
         numericRating,
+        normalizedWasOnTime,
         normalizedComment,
       ],
     );
 
+    const trustMetrics =
+      await recalculateSitterTrustMetrics(
+        client,
+        booking.sitterId,
+      );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
     res.status(201).json({
       review: result.rows[0],
+      trustMetrics,
     });
   } catch (error) {
+    if (client && transactionStarted) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rollbackError) {
+        return next(rollbackError);
+      }
+    }
+
     if (error.code === "23505") {
       return res.status(409).json({
         error:
@@ -188,5 +253,9 @@ export const createReview = async (
     }
 
     next(error);
+  } finally {
+    if (client) {
+      client.release();
+    }
   }
 };
