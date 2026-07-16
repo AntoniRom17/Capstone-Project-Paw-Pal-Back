@@ -12,6 +12,7 @@ import availabilityRoutes from "./routes/availabilityRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import reviewsRoutes from "./routes/reviewsRoutes.js";
 import messagesRoutes from "./routes/messagesRoutes.js";
+import backgroundChecksRoutes from "./routes/backgroundChecksRoutes.js";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -170,6 +171,10 @@ app.use("/api", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/messages", messagesRoutes);
+app.use(
+  "/api/background-checks",
+  backgroundChecksRoutes,
+);
 
 app.use((req, res) => {
   res.status(404).json({

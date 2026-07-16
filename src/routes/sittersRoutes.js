@@ -7,6 +7,9 @@ import {
   deleteSitterService,
 } from "../controllers/sittersController.js";
 import {
+  submitBackgroundCheck,
+} from "../controllers/backgroundChecksController.js";
+import {
   requireAuth,
   requireRole,
 } from "../middleware/auth.js";
@@ -14,6 +17,13 @@ import {
 const router = Router();
 
 router.get("/", getSitters);
+
+router.post(
+  "/me/background-check",
+  requireAuth,
+  requireRole("sitter"),
+  submitBackgroundCheck,
+);
 
 router.post(
   "/me/services",
