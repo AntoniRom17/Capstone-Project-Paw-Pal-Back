@@ -4,6 +4,7 @@ import cors from "cors";
 import morgan from "morgan";
 
 import authRouter from "./routes/auth.js";
+import usersRoutes from "./routes/usersRoutes.js";
 import servicesRoutes from "./routes/servicesRoutes.js";
 import sittersRoutes from "./routes/sittersRoutes.js";
 import petsRoutes from "./routes/petsRoutes.js";
@@ -30,19 +31,23 @@ const DATABASE_ERROR_RESPONSES = {
   },
   "23503": {
     status: 409,
-    message: "The request conflicts with related data",
+    message:
+      "The request conflicts with related data",
   },
   "23505": {
     status: 409,
-    message: "A record with those values already exists",
+    message:
+      "A record with those values already exists",
   },
   "23514": {
     status: 400,
-    message: "The request violates a data rule",
+    message:
+      "The request violates a data rule",
   },
   "23P01": {
     status: 409,
-    message: "The request conflicts with existing data",
+    message:
+      "The request conflicts with existing data",
   },
 };
 
@@ -70,7 +75,8 @@ function getErrorResponse(error) {
   if (error?.type === "entity.parse.failed") {
     return {
       status: 400,
-      message: "Request body contains invalid JSON",
+      message:
+        "Request body contains invalid JSON",
     };
   }
 
@@ -156,6 +162,7 @@ app.get("/api/health", (req, res) => {
 });
 
 app.use("/api/auth", authRouter);
+app.use("/api/users", usersRoutes);
 app.use("/api/services", servicesRoutes);
 app.use("/api/sitters", sittersRoutes);
 app.use("/api/pets", petsRoutes);
