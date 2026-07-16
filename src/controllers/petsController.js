@@ -8,6 +8,10 @@ const optionalValue = (value) => {
   return value === undefined ? null : value;
 };
 
+function isForeignKeyConflict(error) {
+  return error.code === "23503";
+}
+
 export const getPets = async (req, res, next) => {
   try {
     const ownerId = getUserId(req);
@@ -41,7 +45,14 @@ export const getPets = async (req, res, next) => {
 export const createPet = async (req, res, next) => {
   try {
     const ownerId = getUserId(req);
-    const { name, species, breed, age, careNotes, photoUrl } = req.body;
+    const {
+      name,
+      species,
+      breed,
+      age,
+      careNotes,
+      photoUrl,
+    } = req.body;
 
     if (!name || !species) {
       return res.status(400).json({
@@ -130,7 +141,14 @@ export const updatePet = async (req, res, next) => {
   try {
     const ownerId = getUserId(req);
     const { id } = req.params;
-    const { name, species, breed, age, careNotes, photoUrl } = req.body;
+    const {
+      name,
+      species,
+      breed,
+      age,
+      careNotes,
+      photoUrl,
+    } = req.body;
 
     const result = await query(
       `
@@ -153,7 +171,16 @@ export const updatePet = async (req, res, next) => {
         care_notes AS "careNotes",
         photo_url AS "photoUrl";
       `,
-      [name, species, breed, age, careNotes, photoUrl, id, ownerId],
+      [
+        name,
+        species,
+        breed,
+        age,
+        careNotes,
+        photoUrl,
+        id,
+        ownerId,
+      ],
     );
 
     if (result.rows.length === 0) {
@@ -194,6 +221,13 @@ export const deletePet = async (req, res, next) => {
       message: "Pet deleted successfully",
     });
   } catch (error) {
+    if (isForeignKeyConflict(error)) {
+      return res.status(409).json({
+        error:
+          "Pet is attached to a booking and cannot be deleted",
+      });
+    }
+
     next(error);
   }
 };
