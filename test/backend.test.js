@@ -128,6 +128,66 @@ describe("backend API", () => {
     assert.equal(response.status, 403);
   });
 
+  test("owner can delete a pet without bookings", async () => {
+    const data = await seedTestData();
+
+    const response = await request(
+      `/api/pets/${data.otherOwnerPet.id}`,
+      {
+        method: "DELETE",
+        headers: authHeader(data.otherOwner),
+      },
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.body.message,
+      "Pet deleted successfully",
+    );
+
+    const { rows } = await pool.query(
+      `
+      SELECT id
+      FROM pets
+      WHERE id = $1;
+      `,
+      [data.otherOwnerPet.id],
+    );
+
+    assert.equal(rows.length, 0);
+  });
+
+  test("owner cannot delete a pet attached to a booking", async () => {
+    const data = await seedTestData();
+
+    await createTestBooking(data);
+
+    const response = await request(
+      `/api/pets/${data.ownerPet.id}`,
+      {
+        method: "DELETE",
+        headers: authHeader(data.owner),
+      },
+    );
+
+    assert.equal(response.status, 409);
+    assert.equal(
+      response.body.error,
+      "Pet is attached to a booking and cannot be deleted",
+    );
+
+    const { rows } = await pool.query(
+      `
+      SELECT id
+      FROM pets
+      WHERE id = $1;
+      `,
+      [data.ownerPet.id],
+    );
+
+    assert.equal(rows.length, 1);
+  });
+
   test("public availability only returns future unbooked slots", async () => {
     const data = await seedTestData();
 
