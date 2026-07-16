@@ -1,5 +1,8 @@
 import bcrypt from "bcrypt";
 import { pool } from "./client.js";
+import {
+  recalculateSitterTrustMetrics,
+} from "../utils/trustMetrics.js";
 
 const DEMO_PASSWORD = "PawPal123!";
 
@@ -51,7 +54,13 @@ async function insertAvailability(
     )
     RETURNING id;
     `,
-    [sitterId, dayOffset, startTime, endTime, isBooked],
+    [
+      sitterId,
+      dayOffset,
+      startTime,
+      endTime,
+      isBooked,
+    ],
   );
 
   return rows[0].id;
@@ -100,7 +109,8 @@ async function insertBooking(
     JOIN sitter_services
       ON sitter_services.id = $4
     JOIN services
-      ON services.id = sitter_services.service_id
+      ON services.id =
+        sitter_services.service_id
     WHERE availability.id = $5
     RETURNING id, status;
     `,
@@ -115,7 +125,9 @@ async function insertBooking(
   );
 
   if (!rows[0]) {
-    throw new Error("Unable to create seeded booking");
+    throw new Error(
+      "Unable to create seeded booking",
+    );
   }
 
   return rows[0];
@@ -127,7 +139,10 @@ async function seed() {
   try {
     await client.query("BEGIN");
 
-    const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+    const passwordHash = await bcrypt.hash(
+      DEMO_PASSWORD,
+      10,
+    );
 
     const { rows: users } = await client.query(
       `
@@ -141,9 +156,7 @@ async function seed() {
         city,
         state,
         zip_code,
-        trust_score,
-        background_check_status,
-        on_time_percentage
+        background_check_status
       )
       VALUES
         (
@@ -156,9 +169,7 @@ async function seed() {
           'Chicago',
           'IL',
           '60601',
-          NULL,
-          'not_submitted',
-          NULL
+          'not_submitted'
         ),
         (
           'James Chen',
@@ -170,9 +181,7 @@ async function seed() {
           'Chicago',
           'IL',
           '60610',
-          NULL,
-          'not_submitted',
-          NULL
+          'not_submitted'
         ),
         (
           'Priya Patel',
@@ -184,9 +193,7 @@ async function seed() {
           'Evanston',
           'IL',
           '60201',
-          NULL,
-          'not_submitted',
-          NULL
+          'not_submitted'
         ),
         (
           'Sarah Mitchell',
@@ -198,9 +205,7 @@ async function seed() {
           'Chicago',
           'IL',
           '60601',
-          94,
-          'verified',
-          98
+          'verified'
         ),
         (
           'Jordan Kim',
@@ -212,9 +217,7 @@ async function seed() {
           'Chicago',
           'IL',
           '60610',
-          91,
-          'verified',
-          96
+          'verified'
         ),
         (
           'Luis Ortega',
@@ -226,21 +229,42 @@ async function seed() {
           'Evanston',
           'IL',
           '60201',
-          89,
-          'pending',
-          95
+          'pending'
         )
       RETURNING id, name, role;
       `,
       [passwordHash],
     );
 
-    const maya = users.find((user) => user.name === "Maya Rodriguez");
-    const james = users.find((user) => user.name === "James Chen");
-    const priya = users.find((user) => user.name === "Priya Patel");
-    const sarah = users.find((user) => user.name === "Sarah Mitchell");
-    const jordan = users.find((user) => user.name === "Jordan Kim");
-    const luis = users.find((user) => user.name === "Luis Ortega");
+    const maya = users.find(
+      (user) =>
+        user.name === "Maya Rodriguez",
+    );
+
+    const james = users.find(
+      (user) =>
+        user.name === "James Chen",
+    );
+
+    const priya = users.find(
+      (user) =>
+        user.name === "Priya Patel",
+    );
+
+    const sarah = users.find(
+      (user) =>
+        user.name === "Sarah Mitchell",
+    );
+
+    const jordan = users.find(
+      (user) =>
+        user.name === "Jordan Kim",
+    );
+
+    const luis = users.find(
+      (user) =>
+        user.name === "Luis Ortega",
+    );
 
     const { rows: pets } = await client.query(
       `
@@ -287,107 +311,171 @@ async function seed() {
         )
       RETURNING id, name;
       `,
-      [maya.id, james.id, priya.id],
+      [
+        maya.id,
+        james.id,
+        priya.id,
+      ],
     );
 
-    const rocky = pets.find((pet) => pet.name === "Rocky");
-    const luna = pets.find((pet) => pet.name === "Luna");
-    const mochi = pets.find((pet) => pet.name === "Mochi");
-    const biscuit = pets.find((pet) => pet.name === "Biscuit");
+    const rocky = pets.find(
+      (pet) => pet.name === "Rocky",
+    );
 
-    const { rows: services } = await client.query(`
-      INSERT INTO services (
-        name,
-        description,
-        base_price
-      )
-      VALUES
-        (
-          'Dog Walking',
-          '30-minute neighborhood walk',
-          22.00
-        ),
-        (
-          'Pet Sitting',
-          'In-home feeding, play, and potty visit',
-          28.00
-        ),
-        (
-          'Overnight Boarding',
-          'The pet stays at the sitter home',
-          55.00
+    const luna = pets.find(
+      (pet) => pet.name === "Luna",
+    );
+
+    const mochi = pets.find(
+      (pet) => pet.name === "Mochi",
+    );
+
+    const biscuit = pets.find(
+      (pet) => pet.name === "Biscuit",
+    );
+
+    const { rows: services } =
+      await client.query(
+        `
+        INSERT INTO services (
+          name,
+          description,
+          base_price
         )
-      RETURNING id, name;
-    `);
+        VALUES
+          (
+            'Dog Walking',
+            '30-minute neighborhood walk',
+            22.00
+          ),
+          (
+            'Pet Sitting',
+            'In-home feeding, play, and potty visit',
+            28.00
+          ),
+          (
+            'Overnight Boarding',
+            'The pet stays at the sitter home',
+            55.00
+          )
+        RETURNING id, name;
+        `,
+      );
 
     const walking = services.find(
-      (service) => service.name === "Dog Walking",
+      (service) =>
+        service.name === "Dog Walking",
     );
+
     const sitting = services.find(
-      (service) => service.name === "Pet Sitting",
+      (service) =>
+        service.name === "Pet Sitting",
     );
+
     const boarding = services.find(
-      (service) => service.name === "Overnight Boarding",
+      (service) =>
+        service.name ===
+        "Overnight Boarding",
     );
 
-    const sarahWalking = await insertSitterService(
+    const sarahWalking =
+      await insertSitterService(
+        client,
+        sarah.id,
+        walking.id,
+        null,
+      );
+
+    await insertSitterService(
       client,
       sarah.id,
-      walking.id,
-      null,
-    );
-    await insertSitterService(client, sarah.id, sitting.id, 30);
-    const jordanSitting = await insertSitterService(
-      client,
-      jordan.id,
       sitting.id,
-      null,
-    );
-    const jordanBoarding = await insertSitterService(
-      client,
-      jordan.id,
-      boarding.id,
-      60,
-    );
-    const luisWalking = await insertSitterService(
-      client,
-      luis.id,
-      walking.id,
-      25,
+      30,
     );
 
-    const completedSlot = await insertAvailability(
-      client,
-      luis.id,
-      -3,
-      "17:00",
-      "17:30",
-      true,
-    );
-    const acceptedSlot = await insertAvailability(
-      client,
-      sarah.id,
-      1,
-      "09:00",
-      "09:30",
-      true,
-    );
-    const pendingSlot = await insertAvailability(
-      client,
-      jordan.id,
-      3,
-      "10:00",
-      "11:00",
-      false,
-    );
-    const cancelledSlot = await insertAvailability(
-      client,
-      jordan.id,
-      -10,
-      "08:00",
-      "20:00",
-      false,
-    );
+    const jordanSitting =
+      await insertSitterService(
+        client,
+        jordan.id,
+        sitting.id,
+        null,
+      );
+
+    const jordanBoarding =
+      await insertSitterService(
+        client,
+        jordan.id,
+        boarding.id,
+        60,
+      );
+
+    const luisWalking =
+      await insertSitterService(
+        client,
+        luis.id,
+        walking.id,
+        25,
+      );
+
+    const sarahCompletedSlot =
+      await insertAvailability(
+        client,
+        sarah.id,
+        -8,
+        "08:00",
+        "08:30",
+        true,
+      );
+
+    const jordanCompletedSlot =
+      await insertAvailability(
+        client,
+        jordan.id,
+        -6,
+        "12:00",
+        "13:00",
+        true,
+      );
+
+    const luisCompletedSlot =
+      await insertAvailability(
+        client,
+        luis.id,
+        -3,
+        "17:00",
+        "17:30",
+        true,
+      );
+
+    const acceptedSlot =
+      await insertAvailability(
+        client,
+        sarah.id,
+        1,
+        "09:00",
+        "09:30",
+        true,
+      );
+
+    const pendingSlot =
+      await insertAvailability(
+        client,
+        jordan.id,
+        3,
+        "10:00",
+        "11:00",
+        true,
+      );
+
+    const cancelledSlot =
+      await insertAvailability(
+        client,
+        jordan.id,
+        -10,
+        "08:00",
+        "20:00",
+        false,
+      );
 
     await insertAvailability(
       client,
@@ -397,6 +485,7 @@ async function seed() {
       "12:00",
       false,
     );
+
     await insertAvailability(
       client,
       jordan.id,
@@ -405,6 +494,7 @@ async function seed() {
       "18:00",
       false,
     );
+
     await insertAvailability(
       client,
       luis.id,
@@ -413,6 +503,7 @@ async function seed() {
       "08:00",
       false,
     );
+
     await insertAvailability(
       client,
       luis.id,
@@ -422,14 +513,38 @@ async function seed() {
       false,
     );
 
-    const completedBooking = await insertBooking(client, {
-      ownerId: priya.id,
-      sitterId: luis.id,
-      petId: biscuit.id,
-      sitterServiceId: luisWalking,
-      availabilityId: completedSlot,
-      status: "completed",
-    });
+    const sarahCompletedBooking =
+      await insertBooking(client, {
+        ownerId: maya.id,
+        sitterId: sarah.id,
+        petId: rocky.id,
+        sitterServiceId: sarahWalking,
+        availabilityId:
+          sarahCompletedSlot,
+        status: "completed",
+      });
+
+    const jordanCompletedBooking =
+      await insertBooking(client, {
+        ownerId: james.id,
+        sitterId: jordan.id,
+        petId: mochi.id,
+        sitterServiceId: jordanSitting,
+        availabilityId:
+          jordanCompletedSlot,
+        status: "completed",
+      });
+
+    const luisCompletedBooking =
+      await insertBooking(client, {
+        ownerId: priya.id,
+        sitterId: luis.id,
+        petId: biscuit.id,
+        sitterServiceId: luisWalking,
+        availabilityId:
+          luisCompletedSlot,
+        status: "completed",
+      });
 
     await insertBooking(client, {
       ownerId: maya.id,
@@ -464,21 +579,65 @@ async function seed() {
         booking_id,
         reviewer_id,
         rating,
+        was_on_time,
         comment
       )
-      VALUES ($1, $2, 5, $3);
+      VALUES
+        (
+          $1,
+          $2,
+          5,
+          true,
+          $3
+        ),
+        (
+          $4,
+          $5,
+          4,
+          true,
+          $6
+        ),
+        (
+          $7,
+          $8,
+          5,
+          true,
+          $9
+        );
       `,
       [
-        completedBooking.id,
+        sarahCompletedBooking.id,
+        maya.id,
+        "Sarah was professional, caring, and arrived on time.",
+        jordanCompletedBooking.id,
+        james.id,
+        "Jordan communicated well and arrived on time.",
+        luisCompletedBooking.id,
         priya.id,
         "Luis was reliable, sent photos, and arrived on time.",
       ],
     );
 
+    for (const sitter of [
+      sarah,
+      jordan,
+      luis,
+    ]) {
+      await recalculateSitterTrustMetrics(
+        client,
+        sitter.id,
+      );
+    }
+
     await client.query("COMMIT");
 
-    console.log("Database seeded successfully.");
-    console.log(`Demo account password: ${DEMO_PASSWORD}`);
+    console.log(
+      "Database seeded successfully.",
+    );
+
+    console.log(
+      `Demo account password: ${DEMO_PASSWORD}`,
+    );
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -489,7 +648,11 @@ async function seed() {
 
 seed()
   .catch((error) => {
-    console.error("Seed failed:", error.message);
+    console.error(
+      "Seed failed:",
+      error.message,
+    );
+
     process.exitCode = 1;
   })
   .finally(async () => {
