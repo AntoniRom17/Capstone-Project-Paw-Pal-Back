@@ -47,14 +47,31 @@ export async function createBooking(req, res, next) {
 
     if (!petRows[0]) {
       await client.query("ROLLBACK");
-      return res.status(403).json({ error: "That pet does not belong to you" });
+
+      return res.status(403).json({
+        error: "That pet does not belong to you",
+      });
     }
 
     const { rows: slotRows } = await client.query(
-      `SELECT id, date, start_time, end_time, is_booked
-       FROM availability
-       WHERE id = $1 AND sitter_id = $2
-       FOR UPDATE`,
+      `
+      SELECT
+        id,
+        date,
+        start_time,
+        end_time,
+        is_booked,
+        (
+          date < CURRENT_DATE
+          OR (
+            date = CURRENT_DATE
+            AND start_time <= LOCALTIME
+          )
+        ) AS "isExpired"
+      FROM availability
+      WHERE id = $1 AND sitter_id = $2
+      FOR UPDATE;
+      `,
       [availabilityId, sitterId],
     );
 
@@ -62,6 +79,7 @@ export async function createBooking(req, res, next) {
 
     if (!slot) {
       await client.query("ROLLBACK");
+
       return res.status(404).json({
         error: "Availability slot not found for that sitter",
       });
@@ -69,16 +87,29 @@ export async function createBooking(req, res, next) {
 
     if (slot.is_booked) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ error: "That slot is already booked" });
+
+      return res.status(400).json({
+        error: "That slot is already booked",
+      });
+    }
+
+    if (slot.isExpired) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error: "Availability slot has expired",
+      });
     }
 
     const { rows: serviceRows } = await client.query(
-      `SELECT
-         ss.id AS "sitterServiceId",
-         COALESCE(ss.price_override, s.base_price) AS price
-       FROM sitter_services ss
-       JOIN services s ON s.id = ss.service_id
-       WHERE ss.id = $1 AND ss.sitter_id = $2`,
+      `
+      SELECT
+        ss.id AS "sitterServiceId",
+        COALESCE(ss.price_override, s.base_price) AS price
+      FROM sitter_services ss
+      JOIN services s ON s.id = ss.service_id
+      WHERE ss.id = $1 AND ss.sitter_id = $2;
+      `,
       [sitterServiceId, sitterId],
     );
 
@@ -86,37 +117,40 @@ export async function createBooking(req, res, next) {
 
     if (!sitterService) {
       await client.query("ROLLBACK");
+
       return res.status(404).json({
         error: "Sitter service not found for that sitter",
       });
     }
 
     const { rows } = await client.query(
-      `INSERT INTO bookings (
-         owner_id,
-         sitter_id,
-         pet_id,
-         sitter_service_id,
-         availability_id,
-         date,
-         start_time,
-         end_time,
-         status,
-         total_price
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
-       RETURNING
-         id,
-         owner_id AS "ownerId",
-         sitter_id AS "sitterId",
-         pet_id AS "petId",
-         sitter_service_id AS "sitterServiceId",
-         availability_id AS "availabilityId",
-         status,
-         total_price AS "totalPrice",
-         date,
-         start_time AS "startTime",
-         end_time AS "endTime"`,
+      `
+      INSERT INTO bookings (
+        owner_id,
+        sitter_id,
+        pet_id,
+        sitter_service_id,
+        availability_id,
+        date,
+        start_time,
+        end_time,
+        status,
+        total_price
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9)
+      RETURNING
+        id,
+        owner_id AS "ownerId",
+        sitter_id AS "sitterId",
+        pet_id AS "petId",
+        sitter_service_id AS "sitterServiceId",
+        availability_id AS "availabilityId",
+        status,
+        total_price AS "totalPrice",
+        date,
+        start_time AS "startTime",
+        end_time AS "endTime";
+      `,
       [
         req.user.id,
         sitterId,
@@ -130,9 +164,10 @@ export async function createBooking(req, res, next) {
       ],
     );
 
-    await client.query(`UPDATE availability SET is_booked = true WHERE id = $1`, [
-      availabilityId,
-    ]);
+    await client.query(
+      `UPDATE availability SET is_booked = true WHERE id = $1`,
+      [availabilityId],
+    );
 
     await client.query("COMMIT");
 
