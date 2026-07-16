@@ -3,6 +3,13 @@ import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { query } from "../db/client.js";
+import {
+  isPlainObject,
+  isStringWithinLength,
+  isValidEmail,
+  isValidState,
+  isValidZipCode,
+} from "../utils/validation.js";
 
 const router = Router();
 
@@ -25,8 +32,44 @@ function makeToken(user) {
   );
 }
 
+function parseOptionalString(value, field, maxLength) {
+  if (value === undefined || value === null) {
+    return {
+      value: null,
+      error: null,
+    };
+  }
+
+  if (typeof value !== "string") {
+    return {
+      value: null,
+      error: `${field} must be a string`,
+    };
+  }
+
+  const normalizedValue = value.trim();
+
+  if (normalizedValue.length > maxLength) {
+    return {
+      value: null,
+      error: `${field} cannot exceed ${maxLength} characters`,
+    };
+  }
+
+  return {
+    value: normalizedValue || null,
+    error: null,
+  };
+}
+
 router.post("/register", async (req, res, next) => {
   try {
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
+
     const {
       name,
       email,
@@ -40,13 +83,13 @@ router.post("/register", async (req, res, next) => {
     } = req.body;
 
     if (
-      !name ||
-      !email ||
-      !password ||
-      !role ||
-      !city ||
-      !state ||
-      !zipCode
+      name === undefined ||
+      email === undefined ||
+      password === undefined ||
+      role === undefined ||
+      city === undefined ||
+      state === undefined ||
+      zipCode === undefined
     ) {
       return res.status(400).json({
         error:
@@ -54,20 +97,108 @@ router.post("/register", async (req, res, next) => {
       });
     }
 
-    if (!["owner", "sitter"].includes(role)) {
+    if (
+      !isStringWithinLength(name, {
+        min: 1,
+        max: 100,
+      })
+    ) {
+      return res.status(400).json({
+        error:
+          "name must be a non-empty string no longer than 100 characters",
+      });
+    }
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        error: "email must be a valid email address",
+      });
+    }
+
+    if (
+      typeof password !== "string" ||
+      password.trim().length === 0 ||
+      password.length < 8 ||
+      password.length > 128
+    ) {
+      return res.status(400).json({
+        error:
+          "password must be a string between 8 and 128 characters",
+      });
+    }
+
+    if (typeof role !== "string") {
       return res.status(400).json({
         error: "role must be 'owner' or 'sitter'",
       });
     }
 
-    if (password.length < 8) {
+    const normalizedRole = role.trim().toLowerCase();
+
+    if (!["owner", "sitter"].includes(normalizedRole)) {
       return res.status(400).json({
-        error: "password must be at least 8 characters",
+        error: "role must be 'owner' or 'sitter'",
       });
     }
 
+    if (
+      !isStringWithinLength(city, {
+        min: 1,
+        max: 100,
+      })
+    ) {
+      return res.status(400).json({
+        error:
+          "city must be a non-empty string no longer than 100 characters",
+      });
+    }
+
+    if (!isValidState(state)) {
+      return res.status(400).json({
+        error: "state must be a two-letter abbreviation",
+      });
+    }
+
+    if (
+      typeof zipCode !== "string" ||
+      !isValidZipCode(zipCode)
+    ) {
+      return res.status(400).json({
+        error:
+          "zipCode must use 12345 or 12345-6789 format",
+      });
+    }
+
+    const parsedPhone = parseOptionalString(
+      phone,
+      "phone",
+      20,
+    );
+
+    if (parsedPhone.error) {
+      return res.status(400).json({
+        error: parsedPhone.error,
+      });
+    }
+
+    const parsedBio = parseOptionalString(
+      bio,
+      "bio",
+      2000,
+    );
+
+    if (parsedBio.error) {
+      return res.status(400).json({
+        error: parsedBio.error,
+      });
+    }
+
+    const normalizedName = name.trim();
     const normalizedEmail = email.trim().toLowerCase();
+    const normalizedCity = city.trim();
     const normalizedState = state.trim().toUpperCase();
+    const normalizedZipCode = zipCode.trim();
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     const { rows } = await query(
@@ -96,15 +227,15 @@ router.post("/register", async (req, res, next) => {
         zip_code AS "zipCode";
       `,
       [
-        name.trim(),
+        normalizedName,
         normalizedEmail,
         passwordHash,
-        role,
-        bio || null,
-        phone || null,
-        city.trim(),
+        normalizedRole,
+        parsedBio.value,
+        parsedPhone.value,
+        normalizedCity,
         normalizedState,
-        String(zipCode).trim(),
+        normalizedZipCode,
       ],
     );
 
@@ -127,13 +258,38 @@ router.post("/register", async (req, res, next) => {
 
 router.post("/login", async (req, res, next) => {
   try {
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
+
     const { email, password } = req.body;
 
-    if (!email || !password) {
+    if (email === undefined || password === undefined) {
       return res.status(400).json({
         error: "email and password are required",
       });
     }
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        error: "email must be a valid email address",
+      });
+    }
+
+    if (
+      typeof password !== "string" ||
+      password.trim().length === 0 ||
+      password.length > 128
+    ) {
+      return res.status(400).json({
+        error:
+          "password must be a non-empty string no longer than 128 characters",
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
 
     const { rows } = await query(
       `
@@ -151,12 +307,15 @@ router.post("/login", async (req, res, next) => {
       FROM users
       WHERE email = $1;
       `,
-      [email.trim().toLowerCase()],
+      [normalizedEmail],
     );
 
     const user = rows[0];
 
-    if (!user || !(await bcrypt.compare(password, user.password_hash))) {
+    if (
+      !user ||
+      !(await bcrypt.compare(password, user.password_hash))
+    ) {
       return res.status(401).json({
         error: "Invalid email or password",
       });
