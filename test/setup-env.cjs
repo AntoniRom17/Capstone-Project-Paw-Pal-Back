@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({ override: true });
 
 const LOCAL_TEST_HOSTS = new Set([
   "localhost",
