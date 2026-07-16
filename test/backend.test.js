@@ -174,6 +174,158 @@ describe("backend API", () => {
     );
   });
 
+    test("sitter cannot create same-day availability after the start time passed", async () => {
+    const data = await seedTestData();
+
+    const todayString = new Date().toISOString().slice(0, 10);
+
+    const response = await request("/api/availability", {
+      method: "POST",
+      headers: authHeader(data.sitter),
+      body: JSON.stringify({
+        date: todayString,
+        startTime: "00:00",
+        endTime: "00:30",
+      }),
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(
+      response.body.error,
+      "startTime cannot be in the past",
+    );
+  });
+
+  test("sitter cannot create overlapping availability", async () => {
+    const data = await seedTestData();
+
+    const response = await request("/api/availability", {
+      method: "POST",
+      headers: authHeader(data.sitter),
+      body: JSON.stringify({
+        date: data.availability[0].date,
+        startTime: "09:15",
+        endTime: "09:45",
+      }),
+    });
+
+    assert.equal(response.status, 409);
+    assert.equal(
+      response.body.error,
+      "Availability slot overlaps an existing slot",
+    );
+  });
+
+  test("sitter cannot update availability to overlap another slot", async () => {
+    const data = await seedTestData();
+
+    const response = await request(
+      `/api/availability/${data.availability[1].id}`,
+      {
+        method: "PUT",
+        headers: authHeader(data.sitter),
+        body: JSON.stringify({
+          date: data.availability[0].date,
+          startTime: "09:15",
+          endTime: "09:45",
+        }),
+      },
+    );
+
+    assert.equal(response.status, 409);
+    assert.equal(
+      response.body.error,
+      "Availability slot overlaps an existing slot",
+    );
+  });
+
+  test("owner cannot book expired availability directly", async () => {
+    const data = await seedTestData();
+
+    const { rows } = await pool.query(
+      `
+      INSERT INTO availability (
+        sitter_id,
+        date,
+        start_time,
+        end_time,
+        is_booked
+      )
+      VALUES (
+        $1,
+        CURRENT_DATE - 1,
+        '09:00',
+        '09:30',
+        false
+      )
+      RETURNING id;
+      `,
+      [data.sitter.id],
+    );
+
+    const response = await request("/api/bookings", {
+      method: "POST",
+      headers: authHeader(data.owner),
+      body: JSON.stringify({
+        sitterId: data.sitter.id,
+        petId: data.ownerPet.id,
+        sitterServiceId: data.sitterService.id,
+        availabilityId: rows[0].id,
+      }),
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(
+      response.body.error,
+      "Availability slot has expired",
+    );
+  });
+
+  test("sitter cannot update availability attached to a booking", async () => {
+    const data = await seedTestData();
+
+    await createTestBooking(data);
+
+    const response = await request(
+      `/api/availability/${data.availability[0].id}`,
+      {
+        method: "PUT",
+        headers: authHeader(data.sitter),
+        body: JSON.stringify({
+          date: data.availability[0].date,
+          startTime: "11:00",
+          endTime: "11:30",
+        }),
+      },
+    );
+
+    assert.equal(response.status, 409);
+    assert.equal(
+      response.body.error,
+      "Availability slot is attached to a booking and cannot be changed",
+    );
+  });
+
+  test("sitter cannot delete availability attached to a booking", async () => {
+    const data = await seedTestData();
+
+    await createTestBooking(data);
+
+    const response = await request(
+      `/api/availability/${data.availability[0].id}`,
+      {
+        method: "DELETE",
+        headers: authHeader(data.sitter),
+      },
+    );
+
+    assert.equal(response.status, 409);
+    assert.equal(
+      response.body.error,
+      "Availability slot is attached to a booking and cannot be deleted",
+    );
+  });
+
   test("owner can create booking with sitter service", async () => {
     const data = await seedTestData();
 
