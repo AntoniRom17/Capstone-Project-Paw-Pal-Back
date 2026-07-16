@@ -32,18 +32,25 @@ function mapBooking(row) {
 }
 
 function shouldAvailabilityBeBooked(status) {
-  return ["pending", "accepted", "completed"].includes(
-    status,
-  );
+  return [
+    "pending",
+    "accepted",
+    "completed",
+  ].includes(status);
 }
 
-export async function createBooking(req, res, next) {
+export async function createBooking(
+  req,
+  res,
+  next,
+) {
   const client = await pool.connect();
 
   try {
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
     }
 
@@ -66,22 +73,33 @@ export async function createBooking(req, res, next) {
       });
     }
 
-    const numericSitterId = parsePositiveInteger(sitterId);
-    const numericPetId = parsePositiveInteger(petId);
+    const numericSitterId =
+      parsePositiveInteger(sitterId);
+
+    const numericPetId =
+      parsePositiveInteger(petId);
+
     const numericSitterServiceId =
-      parsePositiveInteger(sitterServiceId);
+      parsePositiveInteger(
+        sitterServiceId,
+      );
+
     const numericAvailabilityId =
-      parsePositiveInteger(availabilityId);
+      parsePositiveInteger(
+        availabilityId,
+      );
 
     if (!numericSitterId) {
       return res.status(400).json({
-        error: "sitterId must be a positive integer",
+        error:
+          "sitterId must be a positive integer",
       });
     }
 
     if (!numericPetId) {
       return res.status(400).json({
-        error: "petId must be a positive integer",
+        error:
+          "petId must be a positive integer",
       });
     }
 
@@ -101,44 +119,76 @@ export async function createBooking(req, res, next) {
 
     await client.query("BEGIN");
 
-    const { rows: petRows } = await client.query(
-      `
-      SELECT id
-      FROM pets
-      WHERE id = $1 AND owner_id = $2;
-      `,
-      [numericPetId, req.user.id],
-    );
+    const { rows: sitterRows } =
+      await client.query(
+        `
+        SELECT id
+        FROM users
+        WHERE id = $1
+          AND role = 'sitter'
+          AND is_active = true
+        FOR SHARE;
+        `,
+        [numericSitterId],
+      );
+
+    if (!sitterRows[0]) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Sitter not found",
+      });
+    }
+
+    const { rows: petRows } =
+      await client.query(
+        `
+        SELECT id
+        FROM pets
+        WHERE id = $1
+          AND owner_id = $2;
+        `,
+        [
+          numericPetId,
+          req.user.id,
+        ],
+      );
 
     if (!petRows[0]) {
       await client.query("ROLLBACK");
 
       return res.status(403).json({
-        error: "That pet does not belong to you",
+        error:
+          "That pet does not belong to you",
       });
     }
 
-    const { rows: slotRows } = await client.query(
-      `
-      SELECT
-        id,
-        date,
-        start_time,
-        end_time,
-        is_booked,
-        (
-          date < CURRENT_DATE
-          OR (
-            date = CURRENT_DATE
-            AND start_time <= LOCALTIME
-          )
-        ) AS "isExpired"
-      FROM availability
-      WHERE id = $1 AND sitter_id = $2
-      FOR UPDATE;
-      `,
-      [numericAvailabilityId, numericSitterId],
-    );
+    const { rows: slotRows } =
+      await client.query(
+        `
+        SELECT
+          id,
+          date,
+          start_time,
+          end_time,
+          is_booked,
+          (
+            date < CURRENT_DATE
+            OR (
+              date = CURRENT_DATE
+              AND start_time <= LOCALTIME
+            )
+          ) AS "isExpired"
+        FROM availability
+        WHERE id = $1
+          AND sitter_id = $2
+        FOR UPDATE;
+        `,
+        [
+          numericAvailabilityId,
+          numericSitterId,
+        ],
+      );
 
     const slot = slotRows[0];
 
@@ -155,7 +205,8 @@ export async function createBooking(req, res, next) {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
-        error: "That slot is already booked",
+        error:
+          "That slot is already booked",
       });
     }
 
@@ -163,25 +214,31 @@ export async function createBooking(req, res, next) {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
-        error: "Availability slot has expired",
+        error:
+          "Availability slot has expired",
       });
     }
 
-    const { rows: serviceRows } = await client.query(
-      `
-      SELECT
-        ss.id AS "sitterServiceId",
-        COALESCE(
-          ss.price_override,
-          s.base_price
-        ) AS price
-      FROM sitter_services ss
-      JOIN services s
-        ON s.id = ss.service_id
-      WHERE ss.id = $1 AND ss.sitter_id = $2;
-      `,
-      [numericSitterServiceId, numericSitterId],
-    );
+    const { rows: serviceRows } =
+      await client.query(
+        `
+        SELECT
+          ss.id AS "sitterServiceId",
+          COALESCE(
+            ss.price_override,
+            s.base_price
+          ) AS price
+        FROM sitter_services ss
+        JOIN services s
+          ON s.id = ss.service_id
+        WHERE ss.id = $1
+          AND ss.sitter_id = $2;
+        `,
+        [
+          numericSitterServiceId,
+          numericSitterId,
+        ],
+      );
 
     const sitterService = serviceRows[0];
 
@@ -225,8 +282,10 @@ export async function createBooking(req, res, next) {
         owner_id AS "ownerId",
         sitter_id AS "sitterId",
         pet_id AS "petId",
-        sitter_service_id AS "sitterServiceId",
-        availability_id AS "availabilityId",
+        sitter_service_id
+          AS "sitterServiceId",
+        availability_id
+          AS "availabilityId",
         status,
         total_price AS "totalPrice",
         date,
@@ -268,7 +327,11 @@ export async function createBooking(req, res, next) {
   }
 }
 
-export async function getBookings(req, res, next) {
+export async function getBookings(
+  req,
+  res,
+  next,
+) {
   try {
     const column =
       req.user.role === "sitter"
@@ -282,8 +345,10 @@ export async function getBookings(req, res, next) {
         b.owner_id AS "ownerId",
         b.sitter_id AS "sitterId",
         b.pet_id AS "petId",
-        b.sitter_service_id AS "sitterServiceId",
-        b.availability_id AS "availabilityId",
+        b.sitter_service_id
+          AS "sitterServiceId",
+        b.availability_id
+          AS "availabilityId",
         b.date,
         b.start_time AS "startTime",
         b.end_time AS "endTime",
@@ -305,7 +370,9 @@ export async function getBookings(req, res, next) {
       JOIN services s
         ON s.id = ss.service_id
       WHERE ${column} = $1
-      ORDER BY b.date DESC, b.start_time DESC;
+      ORDER BY
+        b.date DESC,
+        b.start_time DESC;
       `,
       [req.user.id],
     );
@@ -326,17 +393,20 @@ export async function updateBookingStatus(
   const client = await pool.connect();
 
   try {
-    const bookingId = parsePositiveInteger(req.params.id);
+    const bookingId =
+      parsePositiveInteger(req.params.id);
 
     if (!bookingId) {
       return res.status(400).json({
-        error: "id must be a positive integer",
+        error:
+          "id must be a positive integer",
       });
     }
 
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
     }
 
@@ -360,15 +430,16 @@ export async function updateBookingStatus(
 
     await client.query("BEGIN");
 
-    const { rows: bookingRows } = await client.query(
-      `
-      SELECT *
-      FROM bookings
-      WHERE id = $1
-      FOR UPDATE;
-      `,
-      [bookingId],
-    );
+    const { rows: bookingRows } =
+      await client.query(
+        `
+        SELECT *
+        FROM bookings
+        WHERE id = $1
+        FOR UPDATE;
+        `,
+        [bookingId],
+      );
 
     const booking = bookingRows[0];
 
@@ -397,11 +468,15 @@ export async function updateBookingStatus(
     if (
       !(
         isSitter &&
-        sitterMoves.includes(normalizedStatus)
+        sitterMoves.includes(
+          normalizedStatus,
+        )
       ) &&
       !(
         isOwner &&
-        ownerMoves.includes(normalizedStatus)
+        ownerMoves.includes(
+          normalizedStatus,
+        )
       )
     ) {
       await client.query("ROLLBACK");
@@ -427,7 +502,11 @@ export async function updateBookingStatus(
     const legalNext =
       allowedTransitions[booking.status] || [];
 
-    if (!legalNext.includes(normalizedStatus)) {
+    if (
+      !legalNext.includes(
+        normalizedStatus,
+      )
+    ) {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
@@ -457,15 +536,20 @@ export async function updateBookingStatus(
         owner_id AS "ownerId",
         sitter_id AS "sitterId",
         pet_id AS "petId",
-        sitter_service_id AS "sitterServiceId",
-        availability_id AS "availabilityId",
+        sitter_service_id
+          AS "sitterServiceId",
+        availability_id
+          AS "availabilityId",
         status,
         total_price AS "totalPrice",
         date,
         start_time AS "startTime",
         end_time AS "endTime";
       `,
-      [normalizedStatus, bookingId],
+      [
+        normalizedStatus,
+        bookingId,
+      ],
     );
 
     await client.query(

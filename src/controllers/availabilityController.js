@@ -13,8 +13,14 @@ const getUserId = (req) => {
 function normalizeDateValue(value) {
   if (value instanceof Date) {
     const year = value.getFullYear();
-    const month = String(value.getMonth() + 1).padStart(2, "0");
-    const day = String(value.getDate()).padStart(2, "0");
+
+    const month = String(
+      value.getMonth() + 1,
+    ).padStart(2, "0");
+
+    const day = String(
+      value.getDate(),
+    ).padStart(2, "0");
 
     return `${year}-${month}-${day}`;
   }
@@ -22,20 +28,32 @@ function normalizeDateValue(value) {
   return String(value || "").slice(0, 10);
 }
 
-function isEndAfterStart(startTime, endTime) {
+function isEndAfterStart(
+  startTime,
+  endTime,
+) {
   return endTime > startTime;
 }
 
 function isAvailabilityConflict(error) {
-  return error.code === "23505" || error.code === "23P01";
+  return (
+    error.code === "23505" ||
+    error.code === "23P01"
+  );
 }
 
 function validateAvailabilityFields(
   { date, startTime, endTime },
   requireAll = true,
 ) {
-  if (requireAll && (!date || !startTime || !endTime)) {
-    return "date, startTime, and endTime are required";
+  if (
+    requireAll &&
+    (!date || !startTime || !endTime)
+  ) {
+    return (
+      "date, startTime, and endTime " +
+      "are required"
+    );
   }
 
   if (
@@ -44,18 +62,30 @@ function validateAvailabilityFields(
     startTime === undefined &&
     endTime === undefined
   ) {
-    return "At least one of date, startTime, or endTime is required";
+    return (
+      "At least one of date, startTime, " +
+      "or endTime is required"
+    );
   }
 
-  if (date !== undefined && !isValidDate(date)) {
+  if (
+    date !== undefined &&
+    !isValidDate(date)
+  ) {
     return "date must use YYYY-MM-DD format";
   }
 
-  if (startTime !== undefined && !isValidTime(startTime)) {
+  if (
+    startTime !== undefined &&
+    !isValidTime(startTime)
+  ) {
     return "startTime must use HH:MM format";
   }
 
-  if (endTime !== undefined && !isValidTime(endTime)) {
+  if (
+    endTime !== undefined &&
+    !isValidTime(endTime)
+  ) {
     return "endTime must use HH:MM format";
   }
 
@@ -116,7 +146,10 @@ async function findOverlappingAvailability(
     FROM availability
     WHERE sitter_id = $1
       AND date = $2
-      AND ($5::integer IS NULL OR id <> $5::integer)
+      AND (
+        $5::integer IS NULL
+        OR id <> $5::integer
+      )
       AND start_time < $4::time
       AND end_time > $3::time
     LIMIT 1;
@@ -156,7 +189,8 @@ export const getSitterAvailability = async (
   next,
 ) => {
   try {
-    const sitterId = parsePositiveInteger(req.params.id);
+    const sitterId =
+      parsePositiveInteger(req.params.id);
 
     if (!sitterId) {
       return res.status(400).json({
@@ -175,6 +209,14 @@ export const getSitterAvailability = async (
         is_booked AS "isBooked"
       FROM availability
       WHERE sitter_id = $1
+        AND EXISTS (
+          SELECT 1
+          FROM users
+          WHERE users.id =
+            availability.sitter_id
+            AND users.role = 'sitter'
+            AND users.is_active = true
+        )
         AND (
           date > CURRENT_DATE
           OR (
@@ -206,17 +248,28 @@ export const createAvailability = async (
   try {
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
     }
 
     const sitterId = getUserId(req);
-    const { date, startTime, endTime } = req.body;
 
-    const validationError = validateAvailabilityFields(
-      { date, startTime, endTime },
-      true,
-    );
+    const {
+      date,
+      startTime,
+      endTime,
+    } = req.body;
+
+    const validationError =
+      validateAvailabilityFields(
+        {
+          date,
+          startTime,
+          endTime,
+        },
+        true,
+      );
 
     if (validationError) {
       return res.status(400).json({
@@ -226,11 +279,12 @@ export const createAvailability = async (
 
     await client.query("BEGIN");
 
-    const timingError = await getAvailabilityTimingError(
-      client,
-      date,
-      startTime,
-    );
+    const timingError =
+      await getAvailabilityTimingError(
+        client,
+        date,
+        startTime,
+      );
 
     if (timingError) {
       await client.query("ROLLBACK");
@@ -241,12 +295,15 @@ export const createAvailability = async (
     }
 
     const overlappingAvailability =
-      await findOverlappingAvailability(client, {
-        sitterId,
-        date,
-        startTime,
-        endTime,
-      });
+      await findOverlappingAvailability(
+        client,
+        {
+          sitterId,
+          date,
+          startTime,
+          endTime,
+        },
+      );
 
     if (overlappingAvailability) {
       await client.query("ROLLBACK");
@@ -275,7 +332,12 @@ export const createAvailability = async (
         end_time AS "endTime",
         is_booked AS "isBooked";
       `,
-      [sitterId, date, startTime, endTime],
+      [
+        sitterId,
+        date,
+        startTime,
+        endTime,
+      ],
     );
 
     await client.query("COMMIT");
@@ -308,9 +370,9 @@ export const updateAvailability = async (
 
   try {
     const sitterId = getUserId(req);
-    const availabilityId = parsePositiveInteger(
-      req.params.id,
-    );
+
+    const availabilityId =
+      parsePositiveInteger(req.params.id);
 
     if (!availabilityId) {
       return res.status(400).json({
@@ -320,16 +382,26 @@ export const updateAvailability = async (
 
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
     }
 
-    const { date, startTime, endTime } = req.body;
+    const {
+      date,
+      startTime,
+      endTime,
+    } = req.body;
 
-    const validationError = validateAvailabilityFields(
-      { date, startTime, endTime },
-      false,
-    );
+    const validationError =
+      validateAvailabilityFields(
+        {
+          date,
+          startTime,
+          endTime,
+        },
+        false,
+      );
 
     if (validationError) {
       return res.status(400).json({
@@ -339,19 +411,24 @@ export const updateAvailability = async (
 
     await client.query("BEGIN");
 
-    const existingResult = await client.query(
-      `
-      SELECT
-        id,
-        TO_CHAR(date, 'YYYY-MM-DD') AS date,
-        start_time AS "startTime",
-        end_time AS "endTime"
-      FROM availability
-      WHERE id = $1 AND sitter_id = $2
-      FOR UPDATE;
-      `,
-      [availabilityId, sitterId],
-    );
+    const existingResult =
+      await client.query(
+        `
+        SELECT
+          id,
+          TO_CHAR(
+            date,
+            'YYYY-MM-DD'
+          ) AS date,
+          start_time AS "startTime",
+          end_time AS "endTime"
+        FROM availability
+        WHERE id = $1
+          AND sitter_id = $2
+        FOR UPDATE;
+        `,
+        [availabilityId, sitterId],
+      );
 
     if (existingResult.rows.length === 0) {
       await client.query("ROLLBACK");
@@ -362,7 +439,10 @@ export const updateAvailability = async (
     }
 
     if (
-      await hasAttachedBooking(client, availabilityId)
+      await hasAttachedBooking(
+        client,
+        availabilityId,
+      )
     ) {
       await client.query("ROLLBACK");
 
@@ -372,12 +452,17 @@ export const updateAvailability = async (
       });
     }
 
-    const existing = existingResult.rows[0];
+    const existing =
+      existingResult.rows[0];
 
     const nextFields = {
-      date: date ?? normalizeDateValue(existing.date),
-      startTime: startTime ?? existing.startTime,
-      endTime: endTime ?? existing.endTime,
+      date:
+        date ??
+        normalizeDateValue(existing.date),
+      startTime:
+        startTime ?? existing.startTime,
+      endTime:
+        endTime ?? existing.endTime,
     };
 
     if (
@@ -389,15 +474,17 @@ export const updateAvailability = async (
       await client.query("ROLLBACK");
 
       return res.status(400).json({
-        error: "endTime must be after startTime",
+        error:
+          "endTime must be after startTime",
       });
     }
 
-    const timingError = await getAvailabilityTimingError(
-      client,
-      nextFields.date,
-      nextFields.startTime,
-    );
+    const timingError =
+      await getAvailabilityTimingError(
+        client,
+        nextFields.date,
+        nextFields.startTime,
+      );
 
     if (timingError) {
       await client.query("ROLLBACK");
@@ -408,13 +495,17 @@ export const updateAvailability = async (
     }
 
     const overlappingAvailability =
-      await findOverlappingAvailability(client, {
-        sitterId,
-        date: nextFields.date,
-        startTime: nextFields.startTime,
-        endTime: nextFields.endTime,
-        excludeId: availabilityId,
-      });
+      await findOverlappingAvailability(
+        client,
+        {
+          sitterId,
+          date: nextFields.date,
+          startTime:
+            nextFields.startTime,
+          endTime: nextFields.endTime,
+          excludeId: availabilityId,
+        },
+      );
 
     if (overlappingAvailability) {
       await client.query("ROLLBACK");
@@ -432,7 +523,8 @@ export const updateAvailability = async (
         date = $1,
         start_time = $2,
         end_time = $3
-      WHERE id = $4 AND sitter_id = $5
+      WHERE id = $4
+        AND sitter_id = $5
       RETURNING
         id,
         sitter_id AS "sitterId",
@@ -480,9 +572,9 @@ export const deleteAvailability = async (
 
   try {
     const sitterId = getUserId(req);
-    const availabilityId = parsePositiveInteger(
-      req.params.id,
-    );
+
+    const availabilityId =
+      parsePositiveInteger(req.params.id);
 
     if (!availabilityId) {
       return res.status(400).json({
@@ -492,15 +584,17 @@ export const deleteAvailability = async (
 
     await client.query("BEGIN");
 
-    const existingResult = await client.query(
-      `
-      SELECT id
-      FROM availability
-      WHERE id = $1 AND sitter_id = $2
-      FOR UPDATE;
-      `,
-      [availabilityId, sitterId],
-    );
+    const existingResult =
+      await client.query(
+        `
+        SELECT id
+        FROM availability
+        WHERE id = $1
+          AND sitter_id = $2
+        FOR UPDATE;
+        `,
+        [availabilityId, sitterId],
+      );
 
     if (existingResult.rows.length === 0) {
       await client.query("ROLLBACK");
@@ -511,7 +605,10 @@ export const deleteAvailability = async (
     }
 
     if (
-      await hasAttachedBooking(client, availabilityId)
+      await hasAttachedBooking(
+        client,
+        availabilityId,
+      )
     ) {
       await client.query("ROLLBACK");
 
@@ -524,7 +621,8 @@ export const deleteAvailability = async (
     await client.query(
       `
       DELETE FROM availability
-      WHERE id = $1 AND sitter_id = $2;
+      WHERE id = $1
+        AND sitter_id = $2;
       `,
       [availabilityId, sitterId],
     );
@@ -532,7 +630,8 @@ export const deleteAvailability = async (
     await client.query("COMMIT");
 
     res.json({
-      message: "Availability deleted successfully",
+      message:
+        "Availability deleted successfully",
     });
   } catch (error) {
     await client.query("ROLLBACK");

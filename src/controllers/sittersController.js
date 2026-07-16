@@ -55,7 +55,11 @@ export const getSitters = async (req, res, next) => {
     } = req.query;
 
     const params = [];
-    const conditions = ["u.role = 'sitter'"];
+
+    const conditions = [
+      "u.role = 'sitter'",
+      "u.is_active = true",
+    ];
 
     if (service !== undefined) {
       if (
@@ -337,7 +341,8 @@ export const getSitterById = async (
         ) AS "reviewCount"
       FROM users u
       WHERE u.id = $1
-        AND u.role = 'sitter';
+        AND u.role = 'sitter'
+        AND u.is_active = true;
       `,
       [sitterId],
     );
