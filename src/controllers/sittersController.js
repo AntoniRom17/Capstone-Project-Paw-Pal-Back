@@ -1,4 +1,13 @@
 import { query } from "../db/client.js";
+import {
+  hasOwn,
+  isPlainObject,
+  isStringWithinLength,
+  isValidState,
+  isValidZipCode,
+  parseNumber,
+  parsePositiveInteger,
+} from "../utils/validation.js";
 
 function addParameter(params, value) {
   params.push(value);
@@ -19,8 +28,23 @@ export const getSitters = async (req, res, next) => {
     const params = [];
     const conditions = ["u.role = 'sitter'"];
 
-    if (service) {
-      const parameter = addParameter(params, `%${service}%`);
+    if (service !== undefined) {
+      if (
+        !isStringWithinLength(service, {
+          min: 1,
+          max: 50,
+        })
+      ) {
+        return res.status(400).json({
+          error:
+            "service must be a non-empty string no longer than 50 characters",
+        });
+      }
+
+      const parameter = addParameter(
+        params,
+        `%${service.trim()}%`,
+      );
 
       conditions.push(`
         EXISTS (
@@ -34,31 +58,73 @@ export const getSitters = async (req, res, next) => {
       `);
     }
 
-    if (city) {
-      const parameter = addParameter(params, `%${city}%`);
+    if (city !== undefined) {
+      if (
+        !isStringWithinLength(city, {
+          min: 1,
+          max: 100,
+        })
+      ) {
+        return res.status(400).json({
+          error:
+            "city must be a non-empty string no longer than 100 characters",
+        });
+      }
+
+      const parameter = addParameter(
+        params,
+        `%${city.trim()}%`,
+      );
+
       conditions.push(`u.city ILIKE ${parameter}`);
     }
 
-    if (state) {
-      const parameter = addParameter(params, state);
-      conditions.push(`u.state ILIKE ${parameter}`);
+    if (state !== undefined) {
+      if (!isValidState(state)) {
+        return res.status(400).json({
+          error: "state must be a two-letter abbreviation",
+        });
+      }
+
+      const parameter = addParameter(
+        params,
+        state.trim().toUpperCase(),
+      );
+
+      conditions.push(`u.state = ${parameter}`);
     }
 
-    if (zipCode) {
-      const parameter = addParameter(params, zipCode);
+    if (zipCode !== undefined) {
+      if (!isValidZipCode(zipCode)) {
+        return res.status(400).json({
+          error:
+            "zipCode must use 12345 or 12345-6789 format",
+        });
+      }
+
+      const parameter = addParameter(
+        params,
+        String(zipCode).trim(),
+      );
+
       conditions.push(`u.zip_code = ${parameter}`);
     }
 
     if (maxPrice !== undefined) {
-      const numericMaxPrice = Number(maxPrice);
+      const numericMaxPrice = parseNumber(maxPrice, {
+        min: 0,
+      });
 
-      if (!Number.isFinite(numericMaxPrice) || numericMaxPrice < 0) {
+      if (numericMaxPrice === null) {
         return res.status(400).json({
           error: "maxPrice must be a non-negative number",
         });
       }
 
-      const parameter = addParameter(params, numericMaxPrice);
+      const parameter = addParameter(
+        params,
+        numericMaxPrice,
+      );
 
       conditions.push(`
         EXISTS (
@@ -76,19 +142,21 @@ export const getSitters = async (req, res, next) => {
     }
 
     if (minRating !== undefined) {
-      const numericMinRating = Number(minRating);
+      const numericMinRating = parseNumber(minRating, {
+        min: 0,
+        max: 5,
+      });
 
-      if (
-        !Number.isFinite(numericMinRating) ||
-        numericMinRating < 0 ||
-        numericMinRating > 5
-      ) {
+      if (numericMinRating === null) {
         return res.status(400).json({
           error: "minRating must be between 0 and 5",
         });
       }
 
-      const parameter = addParameter(params, numericMinRating);
+      const parameter = addParameter(
+        params,
+        numericMinRating,
+      );
 
       conditions.push(`
         COALESCE(
@@ -121,7 +189,10 @@ export const getSitters = async (req, res, next) => {
         ) AS "onTimePercentage",
         COALESCE(
           (
-            SELECT ROUND(AVG(reviews.rating)::numeric, 1)::float
+            SELECT ROUND(
+              AVG(reviews.rating)::numeric,
+              1
+            )::float
             FROM bookings
             JOIN reviews
               ON reviews.booking_id = bookings.id
@@ -158,7 +229,8 @@ export const getSitters = async (req, res, next) => {
             )
             FROM sitter_services
             JOIN services
-              ON services.id = sitter_services.service_id
+              ON services.id =
+                sitter_services.service_id
             WHERE sitter_services.sitter_id = u.id
           ),
           '[]'::jsonb
@@ -178,9 +250,19 @@ export const getSitters = async (req, res, next) => {
   }
 };
 
-export const getSitterById = async (req, res, next) => {
+export const getSitterById = async (
+  req,
+  res,
+  next,
+) => {
   try {
-    const { id } = req.params;
+    const sitterId = parsePositiveInteger(req.params.id);
+
+    if (!sitterId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
 
     const sitterResult = await query(
       `
@@ -200,7 +282,10 @@ export const getSitterById = async (req, res, next) => {
         ) AS "onTimePercentage",
         COALESCE(
           (
-            SELECT ROUND(AVG(reviews.rating)::numeric, 1)::float
+            SELECT ROUND(
+              AVG(reviews.rating)::numeric,
+              1
+            )::float
             FROM bookings
             JOIN reviews
               ON reviews.booking_id = bookings.id
@@ -219,7 +304,7 @@ export const getSitterById = async (req, res, next) => {
       WHERE u.id = $1
         AND u.role = 'sitter';
       `,
-      [id],
+      [sitterId],
     );
 
     if (sitterResult.rows.length === 0) {
@@ -245,7 +330,7 @@ export const getSitterById = async (req, res, next) => {
       WHERE sitter_services.sitter_id = $1
       ORDER BY services.name;
       `,
-      [id],
+      [sitterId],
     );
 
     const availabilityResult = await query(
@@ -259,11 +344,17 @@ export const getSitterById = async (req, res, next) => {
         is_booked AS "isBooked"
       FROM availability
       WHERE sitter_id = $1
-        AND date >= CURRENT_DATE
+        AND (
+          date > CURRENT_DATE
+          OR (
+            date = CURRENT_DATE
+            AND start_time > LOCALTIME
+          )
+        )
         AND is_booked = false
       ORDER BY date ASC, start_time ASC;
       `,
-      [id],
+      [sitterId],
     );
 
     const reviewsResult = await query(
@@ -284,7 +375,7 @@ export const getSitterById = async (req, res, next) => {
       WHERE bookings.sitter_id = $1
       ORDER BY reviews.created_at DESC;
       `,
-      [id],
+      [sitterId],
     );
 
     res.json({
@@ -300,26 +391,54 @@ export const getSitterById = async (req, res, next) => {
   }
 };
 
-export const addSitterService = async (req, res, next) => {
+export const addSitterService = async (
+  req,
+  res,
+  next,
+) => {
   try {
-    const sitterId = req.user.id;
-    const { serviceId, priceOverride } = req.body;
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
 
-    if (!serviceId) {
+    if (!hasOwn(req.body, "serviceId")) {
       return res.status(400).json({
         error: "serviceId is required",
       });
     }
 
-    if (
-      priceOverride !== undefined &&
-      priceOverride !== null &&
-      (!Number.isFinite(Number(priceOverride)) ||
-        Number(priceOverride) < 0)
-    ) {
+    const sitterId = req.user.id || req.user.userId;
+    const serviceId = parsePositiveInteger(
+      req.body.serviceId,
+    );
+
+    if (!serviceId) {
       return res.status(400).json({
-        error: "priceOverride must be a non-negative number",
+        error: "serviceId must be a positive integer",
       });
+    }
+
+    let normalizedPriceOverride = null;
+
+    if (
+      hasOwn(req.body, "priceOverride") &&
+      req.body.priceOverride !== null
+    ) {
+      normalizedPriceOverride = parseNumber(
+        req.body.priceOverride,
+        {
+          min: 0,
+        },
+      );
+
+      if (normalizedPriceOverride === null) {
+        return res.status(400).json({
+          error:
+            "priceOverride must be a non-negative number or null",
+        });
+      }
     }
 
     const result = await query(
@@ -354,9 +473,7 @@ export const addSitterService = async (req, res, next) => {
       [
         sitterId,
         serviceId,
-        priceOverride === undefined
-          ? null
-          : Number(priceOverride),
+        normalizedPriceOverride,
       ],
     );
 
@@ -366,7 +483,8 @@ export const addSitterService = async (req, res, next) => {
   } catch (error) {
     if (error.code === "23505") {
       return res.status(409).json({
-        error: "This service is already listed by the sitter",
+        error:
+          "This service is already listed by the sitter",
       });
     }
 

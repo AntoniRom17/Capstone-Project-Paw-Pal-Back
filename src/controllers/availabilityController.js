@@ -1,4 +1,10 @@
 import { pool, query } from "../db/client.js";
+import {
+  isPlainObject,
+  isValidDate,
+  isValidTime,
+  parsePositiveInteger,
+} from "../utils/validation.js";
 
 const getUserId = (req) => {
   return req.user.id || req.user.userId;
@@ -14,29 +20,6 @@ function normalizeDateValue(value) {
   }
 
   return String(value || "").slice(0, 10);
-}
-
-function isValidDate(value) {
-  if (
-    typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(value)
-  ) {
-    return false;
-  }
-
-  const date = new Date(`${value}T00:00:00Z`);
-
-  return (
-    !Number.isNaN(date.getTime()) &&
-    date.toISOString().slice(0, 10) === value
-  );
-}
-
-function isValidTime(value) {
-  return (
-    typeof value === "string" &&
-    /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
-  );
 }
 
 function isEndAfterStart(startTime, endTime) {
@@ -119,7 +102,13 @@ async function getAvailabilityTimingError(
 
 async function findOverlappingAvailability(
   client,
-  { sitterId, date, startTime, endTime, excludeId = null },
+  {
+    sitterId,
+    date,
+    startTime,
+    endTime,
+    excludeId = null,
+  },
 ) {
   const result = await client.query(
     `
@@ -132,13 +121,22 @@ async function findOverlappingAvailability(
       AND end_time > $3::time
     LIMIT 1;
     `,
-    [sitterId, date, startTime, endTime, excludeId],
+    [
+      sitterId,
+      date,
+      startTime,
+      endTime,
+      excludeId,
+    ],
   );
 
   return result.rows[0] || null;
 }
 
-async function hasAttachedBooking(client, availabilityId) {
+async function hasAttachedBooking(
+  client,
+  availabilityId,
+) {
   const result = await client.query(
     `
     SELECT id
@@ -158,7 +156,13 @@ export const getSitterAvailability = async (
   next,
 ) => {
   try {
-    const { id } = req.params;
+    const sitterId = parsePositiveInteger(req.params.id);
+
+    if (!sitterId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
 
     const result = await query(
       `
@@ -181,7 +185,7 @@ export const getSitterAvailability = async (
         AND is_booked = false
       ORDER BY date ASC, start_time ASC;
       `,
-      [id],
+      [sitterId],
     );
 
     res.json({
@@ -200,6 +204,12 @@ export const createAvailability = async (
   const client = await pool.connect();
 
   try {
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
+
     const sitterId = getUserId(req);
     const { date, startTime, endTime } = req.body;
 
@@ -242,7 +252,8 @@ export const createAvailability = async (
       await client.query("ROLLBACK");
 
       return res.status(409).json({
-        error: "Availability slot overlaps an existing slot",
+        error:
+          "Availability slot overlaps an existing slot",
       });
     }
 
@@ -277,7 +288,8 @@ export const createAvailability = async (
 
     if (isAvailabilityConflict(error)) {
       return res.status(409).json({
-        error: "Availability slot overlaps an existing slot",
+        error:
+          "Availability slot overlaps an existing slot",
       });
     }
 
@@ -296,7 +308,22 @@ export const updateAvailability = async (
 
   try {
     const sitterId = getUserId(req);
-    const { id } = req.params;
+    const availabilityId = parsePositiveInteger(
+      req.params.id,
+    );
+
+    if (!availabilityId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
+
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
+
     const { date, startTime, endTime } = req.body;
 
     const validationError = validateAvailabilityFields(
@@ -323,7 +350,7 @@ export const updateAvailability = async (
       WHERE id = $1 AND sitter_id = $2
       FOR UPDATE;
       `,
-      [id, sitterId],
+      [availabilityId, sitterId],
     );
 
     if (existingResult.rows.length === 0) {
@@ -334,7 +361,9 @@ export const updateAvailability = async (
       });
     }
 
-    if (await hasAttachedBooking(client, id)) {
+    if (
+      await hasAttachedBooking(client, availabilityId)
+    ) {
       await client.query("ROLLBACK");
 
       return res.status(409).json({
@@ -384,14 +413,15 @@ export const updateAvailability = async (
         date: nextFields.date,
         startTime: nextFields.startTime,
         endTime: nextFields.endTime,
-        excludeId: Number(id),
+        excludeId: availabilityId,
       });
 
     if (overlappingAvailability) {
       await client.query("ROLLBACK");
 
       return res.status(409).json({
-        error: "Availability slot overlaps an existing slot",
+        error:
+          "Availability slot overlaps an existing slot",
       });
     }
 
@@ -415,7 +445,7 @@ export const updateAvailability = async (
         nextFields.date,
         nextFields.startTime,
         nextFields.endTime,
-        id,
+        availabilityId,
         sitterId,
       ],
     );
@@ -430,7 +460,8 @@ export const updateAvailability = async (
 
     if (isAvailabilityConflict(error)) {
       return res.status(409).json({
-        error: "Availability slot overlaps an existing slot",
+        error:
+          "Availability slot overlaps an existing slot",
       });
     }
 
@@ -449,7 +480,15 @@ export const deleteAvailability = async (
 
   try {
     const sitterId = getUserId(req);
-    const { id } = req.params;
+    const availabilityId = parsePositiveInteger(
+      req.params.id,
+    );
+
+    if (!availabilityId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
 
     await client.query("BEGIN");
 
@@ -460,7 +499,7 @@ export const deleteAvailability = async (
       WHERE id = $1 AND sitter_id = $2
       FOR UPDATE;
       `,
-      [id, sitterId],
+      [availabilityId, sitterId],
     );
 
     if (existingResult.rows.length === 0) {
@@ -471,7 +510,9 @@ export const deleteAvailability = async (
       });
     }
 
-    if (await hasAttachedBooking(client, id)) {
+    if (
+      await hasAttachedBooking(client, availabilityId)
+    ) {
       await client.query("ROLLBACK");
 
       return res.status(409).json({
@@ -485,7 +526,7 @@ export const deleteAvailability = async (
       DELETE FROM availability
       WHERE id = $1 AND sitter_id = $2;
       `,
-      [id, sitterId],
+      [availabilityId, sitterId],
     );
 
     await client.query("COMMIT");
