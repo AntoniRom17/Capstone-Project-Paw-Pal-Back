@@ -266,6 +266,534 @@ describe("backend API", () => {
     assert.equal(invalidPassword.status, 400);
   });
 
+  test("authenticated user can read and update profile", async () => {
+    const data = await seedTestData();
+
+    const getResponse = await request("/api/users/me", {
+      headers: authHeader(data.owner),
+    });
+
+    assert.equal(getResponse.status, 200);
+    assert.equal(getResponse.body.user.id, data.owner.id);
+    assert.equal(
+      getResponse.body.user.email,
+      "owner@example.com",
+    );
+    assert.equal(getResponse.body.user.isActive, true);
+    assert.equal(
+      Object.hasOwn(
+        getResponse.body.user,
+        "password_hash",
+      ),
+      false,
+    );
+
+    const updateResponse = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          name: "  Updated Owner  ",
+          email:
+            "  UPDATED.OWNER@EXAMPLE.COM  ",
+          bio: "  Loves long walks  ",
+          phone: "  312-555-0100  ",
+          city: "  Evanston  ",
+          state: " il ",
+          zipCode: "60201-1234",
+        }),
+      },
+    );
+
+    assert.equal(updateResponse.status, 200);
+    assert.equal(
+      updateResponse.body.user.name,
+      "Updated Owner",
+    );
+    assert.equal(
+      updateResponse.body.user.email,
+      "updated.owner@example.com",
+    );
+    assert.equal(
+      updateResponse.body.user.bio,
+      "Loves long walks",
+    );
+    assert.equal(
+      updateResponse.body.user.phone,
+      "312-555-0100",
+    );
+    assert.equal(
+      updateResponse.body.user.city,
+      "Evanston",
+    );
+    assert.equal(
+      updateResponse.body.user.state,
+      "IL",
+    );
+    assert.equal(
+      updateResponse.body.user.zipCode,
+      "60201-1234",
+    );
+
+    const refreshedResponse = await request(
+      "/api/users/me",
+      {
+        headers: authHeader(data.owner),
+      },
+    );
+
+    assert.equal(refreshedResponse.status, 200);
+    assert.equal(
+      refreshedResponse.body.user.email,
+      "updated.owner@example.com",
+    );
+  });
+
+  test("profile updates reject invalid fields and duplicate emails", async () => {
+    const data = await seedTestData();
+
+    const emptyBody = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({}),
+      },
+    );
+
+    assert.equal(emptyBody.status, 400);
+
+    const whitespaceName = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          name: "   ",
+        }),
+      },
+    );
+
+    assert.equal(whitespaceName.status, 400);
+
+    const invalidEmail = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          email: "not-an-email",
+        }),
+      },
+    );
+
+    assert.equal(invalidEmail.status, 400);
+
+    const invalidState = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          state: "Illinois",
+        }),
+      },
+    );
+
+    assert.equal(invalidState.status, 400);
+
+    const invalidZipCode = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          zipCode: "invalid",
+        }),
+      },
+    );
+
+    assert.equal(invalidZipCode.status, 400);
+
+    const invalidBio = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          bio: 42,
+        }),
+      },
+    );
+
+    assert.equal(invalidBio.status, 400);
+
+    const duplicateEmail = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          email: data.sitter.email,
+        }),
+      },
+    );
+
+    assert.equal(duplicateEmail.status, 409);
+    assert.equal(
+      duplicateEmail.body.error,
+      "An account with that email already exists",
+    );
+  });
+
+  test("user can intentionally clear nullable profile fields", async () => {
+    const data = await seedTestData();
+
+    const setResponse = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          bio: "Available on weekends",
+          phone: "312-555-0110",
+        }),
+      },
+    );
+
+    assert.equal(setResponse.status, 200);
+    assert.equal(
+      setResponse.body.user.bio,
+      "Available on weekends",
+    );
+    assert.equal(
+      setResponse.body.user.phone,
+      "312-555-0110",
+    );
+
+    const clearResponse = await request(
+      "/api/users/me",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          bio: null,
+          phone: null,
+        }),
+      },
+    );
+
+    assert.equal(clearResponse.status, 200);
+    assert.equal(clearResponse.body.user.bio, null);
+    assert.equal(clearResponse.body.user.phone, null);
+  });
+
+  test("user can change password and login with the new password", async () => {
+    const data = await seedTestData();
+
+    const changeResponse = await request(
+      "/api/users/me/password",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          currentPassword: "PawPal123!",
+          newPassword: "NewPawPal456!",
+        }),
+      },
+    );
+
+    assert.equal(changeResponse.status, 200);
+    assert.equal(
+      changeResponse.body.message,
+      "Password changed successfully",
+    );
+
+    const oldLoginResponse = await request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          email: data.owner.email,
+          password: "PawPal123!",
+        }),
+      },
+    );
+
+    assert.equal(oldLoginResponse.status, 401);
+
+    const newLoginResponse = await request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          email: data.owner.email,
+          password: "NewPawPal456!",
+        }),
+      },
+    );
+
+    assert.equal(newLoginResponse.status, 200);
+    assert.ok(newLoginResponse.body.token);
+  });
+
+  test("password changes reject incorrect and invalid passwords", async () => {
+    const data = await seedTestData();
+
+    const incorrectCurrentPassword =
+      await request(
+        "/api/users/me/password",
+        {
+          method: "PATCH",
+          headers: authHeader(data.owner),
+          body: JSON.stringify({
+            currentPassword: "WrongPassword!",
+            newPassword: "NewPawPal456!",
+          }),
+        },
+      );
+
+    assert.equal(
+      incorrectCurrentPassword.status,
+      401,
+    );
+
+    const shortPassword = await request(
+      "/api/users/me/password",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          currentPassword: "PawPal123!",
+          newPassword: "short",
+        }),
+      },
+    );
+
+    assert.equal(shortPassword.status, 400);
+
+    const unchangedPassword = await request(
+      "/api/users/me/password",
+      {
+        method: "PATCH",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          currentPassword: "PawPal123!",
+          newPassword: "PawPal123!",
+        }),
+      },
+    );
+
+    assert.equal(unchangedPassword.status, 400);
+    assert.equal(
+      unchangedPassword.body.error,
+      "New password must be different from current password",
+    );
+  });
+
+  test("user can deactivate account and can no longer authenticate", async () => {
+    const data = await seedTestData();
+
+    const deactivateResponse = await request(
+      "/api/users/me",
+      {
+        method: "DELETE",
+        headers: authHeader(data.otherOwner),
+        body: JSON.stringify({
+          password: "PawPal123!",
+        }),
+      },
+    );
+
+    assert.equal(deactivateResponse.status, 200);
+    assert.equal(
+      deactivateResponse.body.message,
+      "Account deactivated successfully",
+    );
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        is_active AS "isActive",
+        deactivated_at AS "deactivatedAt"
+      FROM users
+      WHERE id = $1;
+      `,
+      [data.otherOwner.id],
+    );
+
+    assert.equal(rows[0].isActive, false);
+    assert.ok(rows[0].deactivatedAt);
+
+    const profileResponse = await request(
+      "/api/users/me",
+      {
+        headers: authHeader(data.otherOwner),
+      },
+    );
+
+    assert.equal(profileResponse.status, 401);
+    assert.equal(
+      profileResponse.body.error,
+      "Account is inactive or no longer exists",
+    );
+
+    const loginResponse = await request(
+      "/api/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          email: data.otherOwner.email,
+          password: "PawPal123!",
+        }),
+      },
+    );
+
+    assert.equal(loginResponse.status, 401);
+    assert.equal(
+      loginResponse.body.error,
+      "Invalid email or password",
+    );
+  });
+
+  test("account deactivation requires correct password and no active bookings", async () => {
+    const data = await seedTestData();
+
+    const wrongPasswordResponse = await request(
+      "/api/users/me",
+      {
+        method: "DELETE",
+        headers: authHeader(data.otherOwner),
+        body: JSON.stringify({
+          password: "WrongPassword!",
+        }),
+      },
+    );
+
+    assert.equal(wrongPasswordResponse.status, 401);
+
+    await createTestBooking(data);
+
+    const ownerResponse = await request(
+      "/api/users/me",
+      {
+        method: "DELETE",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          password: "PawPal123!",
+        }),
+      },
+    );
+
+    assert.equal(ownerResponse.status, 409);
+    assert.equal(
+      ownerResponse.body.error,
+      "Account cannot be deactivated while active bookings exist",
+    );
+
+    const sitterResponse = await request(
+      "/api/users/me",
+      {
+        method: "DELETE",
+        headers: authHeader(data.sitter),
+        body: JSON.stringify({
+          password: "PawPal123!",
+        }),
+      },
+    );
+
+    assert.equal(sitterResponse.status, 409);
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        id,
+        is_active AS "isActive"
+      FROM users
+      WHERE id = ANY($1::integer[])
+      ORDER BY id;
+      `,
+      [[data.owner.id, data.sitter.id]],
+    );
+
+    assert.equal(rows.length, 2);
+    assert.ok(
+      rows.every((user) => user.isActive),
+    );
+  });
+
+  test("deactivated sitter is hidden and cannot receive bookings", async () => {
+    const data = await seedTestData();
+
+    const deactivateResponse = await request(
+      "/api/users/me",
+      {
+        method: "DELETE",
+        headers: authHeader(data.sitter),
+        body: JSON.stringify({
+          password: "PawPal123!",
+        }),
+      },
+    );
+
+    assert.equal(deactivateResponse.status, 200);
+
+    const listResponse = await request(
+      "/api/sitters",
+    );
+
+    assert.equal(listResponse.status, 200);
+    assert.equal(
+      listResponse.body.sitters.some(
+        (sitter) => sitter.id === data.sitter.id,
+      ),
+      false,
+    );
+
+    const detailResponse = await request(
+      `/api/sitters/${data.sitter.id}`,
+    );
+
+    assert.equal(detailResponse.status, 404);
+    assert.equal(
+      detailResponse.body.error,
+      "Sitter not found",
+    );
+
+    const availabilityResponse = await request(
+      `/api/sitters/${data.sitter.id}/availability`,
+    );
+
+    assert.equal(availabilityResponse.status, 200);
+    assert.deepEqual(
+      availabilityResponse.body.availability,
+      [],
+    );
+
+    const bookingResponse = await request(
+      "/api/bookings",
+      {
+        method: "POST",
+        headers: authHeader(data.owner),
+        body: JSON.stringify({
+          sitterId: data.sitter.id,
+          petId: data.ownerPet.id,
+          sitterServiceId:
+            data.sitterService.id,
+          availabilityId:
+            data.availability[0].id,
+        }),
+      },
+    );
+
+    assert.equal(bookingResponse.status, 404);
+    assert.equal(
+      bookingResponse.body.error,
+      "Sitter not found",
+    );
+  });
+
   test("owner can create a pet with age zero", async () => {
     const data = await seedTestData();
 
