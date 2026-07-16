@@ -9,9 +9,38 @@ import {
   parsePositiveInteger,
 } from "../utils/validation.js";
 
+const MAX_SERVICE_PRICE = 999999.99;
+
 function addParameter(params, value) {
   params.push(value);
   return `$${params.length}`;
+}
+
+function parsePriceOverride(value) {
+  if (value === null) {
+    return {
+      value: null,
+      error: null,
+    };
+  }
+
+  const numericValue = parseNumber(value, {
+    min: 0,
+    max: MAX_SERVICE_PRICE,
+  });
+
+  if (numericValue === null) {
+    return {
+      value: null,
+      error:
+        "priceOverride must be a non-negative number or null",
+    };
+  }
+
+  return {
+    value: numericValue,
+    error: null,
+  };
 }
 
 export const getSitters = async (req, res, next) => {
@@ -82,7 +111,8 @@ export const getSitters = async (req, res, next) => {
     if (state !== undefined) {
       if (!isValidState(state)) {
         return res.status(400).json({
-          error: "state must be a two-letter abbreviation",
+          error:
+            "state must be a two-letter abbreviation",
         });
       }
 
@@ -113,11 +143,13 @@ export const getSitters = async (req, res, next) => {
     if (maxPrice !== undefined) {
       const numericMaxPrice = parseNumber(maxPrice, {
         min: 0,
+        max: MAX_SERVICE_PRICE,
       });
 
       if (numericMaxPrice === null) {
         return res.status(400).json({
-          error: "maxPrice must be a non-negative number",
+          error:
+            "maxPrice must be a number between 0 and 999999.99",
         });
       }
 
@@ -164,7 +196,8 @@ export const getSitters = async (req, res, next) => {
             SELECT AVG(review_filter.rating)
             FROM bookings booking_filter
             JOIN reviews review_filter
-              ON review_filter.booking_id = booking_filter.id
+              ON review_filter.booking_id =
+                booking_filter.id
             WHERE booking_filter.sitter_id = u.id
           ),
           0
@@ -182,7 +215,8 @@ export const getSitters = async (req, res, next) => {
         u.state,
         u.zip_code AS "zipCode",
         COALESCE(u.trust_score, 0) AS "trustScore",
-        u.background_check_status AS "backgroundCheckStatus",
+        u.background_check_status
+          AS "backgroundCheckStatus",
         COALESCE(
           u.on_time_percentage,
           0
@@ -275,7 +309,8 @@ export const getSitterById = async (
         u.state,
         u.zip_code AS "zipCode",
         COALESCE(u.trust_score, 0) AS "trustScore",
-        u.background_check_status AS "backgroundCheckStatus",
+        u.background_check_status
+          AS "backgroundCheckStatus",
         COALESCE(
           u.on_time_percentage,
           0
@@ -409,36 +444,35 @@ export const addSitterService = async (
       });
     }
 
-    const sitterId = req.user.id || req.user.userId;
+    const sitterId =
+      req.user.id || req.user.userId;
+
     const serviceId = parsePositiveInteger(
       req.body.serviceId,
     );
 
     if (!serviceId) {
       return res.status(400).json({
-        error: "serviceId must be a positive integer",
+        error:
+          "serviceId must be a positive integer",
       });
     }
 
     let normalizedPriceOverride = null;
 
-    if (
-      hasOwn(req.body, "priceOverride") &&
-      req.body.priceOverride !== null
-    ) {
-      normalizedPriceOverride = parseNumber(
+    if (hasOwn(req.body, "priceOverride")) {
+      const parsedPrice = parsePriceOverride(
         req.body.priceOverride,
-        {
-          min: 0,
-        },
       );
 
-      if (normalizedPriceOverride === null) {
+      if (parsedPrice.error) {
         return res.status(400).json({
-          error:
-            "priceOverride must be a non-negative number or null",
+          error: parsedPrice.error,
         });
       }
+
+      normalizedPriceOverride =
+        parsedPrice.value;
     }
 
     const result = await query(
@@ -490,7 +524,146 @@ export const addSitterService = async (
 
     if (error.code === "23503") {
       return res.status(400).json({
-        error: "The selected service does not exist",
+        error:
+          "The selected service does not exist",
+      });
+    }
+
+    next(error);
+  }
+};
+
+export const updateSitterService = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const sitterId =
+      req.user.id || req.user.userId;
+
+    const sitterServiceId =
+      parsePositiveInteger(req.params.id);
+
+    if (!sitterServiceId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
+
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
+
+    if (!hasOwn(req.body, "priceOverride")) {
+      return res.status(400).json({
+        error: "priceOverride is required",
+      });
+    }
+
+    const parsedPrice = parsePriceOverride(
+      req.body.priceOverride,
+    );
+
+    if (parsedPrice.error) {
+      return res.status(400).json({
+        error: parsedPrice.error,
+      });
+    }
+
+    const result = await query(
+      `
+      WITH updated AS (
+        UPDATE sitter_services
+        SET price_override = $1
+        WHERE id = $2
+          AND sitter_id = $3
+        RETURNING
+          id,
+          sitter_id,
+          service_id,
+          price_override
+      )
+      SELECT
+        updated.id AS "sitterServiceId",
+        updated.sitter_id AS "sitterId",
+        updated.service_id AS "serviceId",
+        services.name,
+        services.description,
+        COALESCE(
+          updated.price_override,
+          services.base_price
+        )::float AS price
+      FROM updated
+      JOIN services
+        ON services.id = updated.service_id;
+      `,
+      [
+        parsedPrice.value,
+        sitterServiceId,
+        sitterId,
+      ],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "Sitter service not found",
+      });
+    }
+
+    res.status(200).json({
+      sitterService: result.rows[0],
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteSitterService = async (
+  req,
+  res,
+  next,
+) => {
+  try {
+    const sitterId =
+      req.user.id || req.user.userId;
+
+    const sitterServiceId =
+      parsePositiveInteger(req.params.id);
+
+    if (!sitterServiceId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
+
+    const result = await query(
+      `
+      DELETE FROM sitter_services
+      WHERE id = $1
+        AND sitter_id = $2
+      RETURNING id;
+      `,
+      [sitterServiceId, sitterId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "Sitter service not found",
+      });
+    }
+
+    res.status(200).json({
+      message:
+        "Sitter service deleted successfully",
+    });
+  } catch (error) {
+    if (error.code === "23503") {
+      return res.status(409).json({
+        error:
+          "Sitter service is attached to a booking and cannot be deleted",
       });
     }
 
