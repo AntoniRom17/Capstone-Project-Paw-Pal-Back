@@ -1,4 +1,5 @@
-import { query } from "../db/client.js";
+import bcrypt from "bcrypt";
+import { pool, query } from "../db/client.js";
 import {
   hasOwn,
   isPlainObject,
@@ -25,6 +26,23 @@ function getUserId(req) {
 function hasProfileUpdate(body) {
   return PROFILE_FIELDS.some((field) =>
     hasOwn(body, field),
+  );
+}
+
+function isValidCurrentPassword(value) {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length <= 128
+  );
+}
+
+function isValidNewPassword(value) {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    value.length >= 8 &&
+    value.length <= 128
   );
 }
 
@@ -164,6 +182,7 @@ export async function updateCurrentUser(
     const hasPhone = hasOwn(req.body, "phone");
     const hasCity = hasOwn(req.body, "city");
     const hasState = hasOwn(req.body, "state");
+
     const hasZipCode = hasOwn(
       req.body,
       "zipCode",
@@ -377,5 +396,230 @@ export async function updateCurrentUser(
     }
 
     next(error);
+  }
+}
+
+export async function changePassword(
+  req,
+  res,
+  next,
+) {
+  try {
+    const userId = getUserId(req);
+
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
+
+    const {
+      currentPassword,
+      newPassword,
+    } = req.body;
+
+    if (
+      currentPassword === undefined ||
+      newPassword === undefined
+    ) {
+      return res.status(400).json({
+        error:
+          "currentPassword and newPassword are required",
+      });
+    }
+
+    if (!isValidCurrentPassword(currentPassword)) {
+      return res.status(400).json({
+        error:
+          "currentPassword must be a non-empty string no longer than 128 characters",
+      });
+    }
+
+    if (!isValidNewPassword(newPassword)) {
+      return res.status(400).json({
+        error:
+          "newPassword must be a string between 8 and 128 characters",
+      });
+    }
+
+    const result = await query(
+      `
+      SELECT password_hash
+      FROM users
+      WHERE id = $1
+        AND is_active = true;
+      `,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    const currentPasswordMatches =
+      await bcrypt.compare(
+        currentPassword,
+        result.rows[0].password_hash,
+      );
+
+    if (!currentPasswordMatches) {
+      return res.status(401).json({
+        error: "Current password is incorrect",
+      });
+    }
+
+    const passwordIsUnchanged =
+      await bcrypt.compare(
+        newPassword,
+        result.rows[0].password_hash,
+      );
+
+    if (passwordIsUnchanged) {
+      return res.status(400).json({
+        error:
+          "New password must be different from current password",
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(
+      newPassword,
+      10,
+    );
+
+    await query(
+      `
+      UPDATE users
+      SET password_hash = $1
+      WHERE id = $2
+        AND is_active = true;
+      `,
+      [passwordHash, userId],
+    );
+
+    res.status(200).json({
+      message: "Password changed successfully",
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deactivateCurrentUser(
+  req,
+  res,
+  next,
+) {
+  const client = await pool.connect();
+
+  try {
+    const userId = getUserId(req);
+
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error: "Request body must be a JSON object",
+      });
+    }
+
+    const { password } = req.body;
+
+    if (password === undefined) {
+      return res.status(400).json({
+        error: "password is required",
+      });
+    }
+
+    if (!isValidCurrentPassword(password)) {
+      return res.status(400).json({
+        error:
+          "password must be a non-empty string no longer than 128 characters",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    const userResult = await client.query(
+      `
+      SELECT
+        id,
+        password_hash
+      FROM users
+      WHERE id = $1
+        AND is_active = true
+      FOR UPDATE;
+      `,
+      [userId],
+    );
+
+    if (userResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    const passwordMatches = await bcrypt.compare(
+      password,
+      userResult.rows[0].password_hash,
+    );
+
+    if (!passwordMatches) {
+      await client.query("ROLLBACK");
+
+      return res.status(401).json({
+        error: "Password is incorrect",
+      });
+    }
+
+    const activeBookingResult =
+      await client.query(
+        `
+        SELECT id
+        FROM bookings
+        WHERE (
+          owner_id = $1
+          OR sitter_id = $1
+        )
+          AND status IN (
+            'pending',
+            'accepted'
+          )
+        LIMIT 1;
+        `,
+        [userId],
+      );
+
+    if (activeBookingResult.rows.length > 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        error:
+          "Account cannot be deactivated while active bookings exist",
+      });
+    }
+
+    await client.query(
+      `
+      UPDATE users
+      SET
+        is_active = false,
+        deactivated_at = NOW()
+      WHERE id = $1;
+      `,
+      [userId],
+    );
+
+    await client.query("COMMIT");
+
+    res.status(200).json({
+      message: "Account deactivated successfully",
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    next(error);
+  } finally {
+    client.release();
   }
 }

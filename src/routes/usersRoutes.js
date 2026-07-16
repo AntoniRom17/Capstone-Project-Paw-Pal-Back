@@ -1,5 +1,7 @@
 import { Router } from "express";
 import {
+  changePassword,
+  deactivateCurrentUser,
   getCurrentUser,
   updateCurrentUser,
 } from "../controllers/usersController.js";
@@ -11,5 +13,7 @@ router.use(requireAuth);
 
 router.get("/me", getCurrentUser);
 router.patch("/me", updateCurrentUser);
+router.patch("/me/password", changePassword);
+router.delete("/me", deactivateCurrentUser);
 
 export default router;
