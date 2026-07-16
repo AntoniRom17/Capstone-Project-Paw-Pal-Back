@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
 DROP TABLE IF EXISTS messages CASCADE;
 DROP TABLE IF EXISTS reviews CASCADE;
 DROP TABLE IF EXISTS bookings CASCADE;
@@ -77,7 +79,16 @@ CREATE TABLE availability (
   is_booked BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (end_time > start_time),
-  UNIQUE (sitter_id, date, start_time, end_time)
+  UNIQUE (sitter_id, date, start_time, end_time),
+  EXCLUDE USING gist (
+    sitter_id WITH =,
+    date WITH =,
+    tsrange(
+      date + start_time,
+      date + end_time,
+      '[)'
+    ) WITH &&
+  )
 );
 
 CREATE TABLE bookings (
