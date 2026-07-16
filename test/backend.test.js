@@ -51,6 +51,20 @@ async function createTestBooking(data, availabilityIndex = 0) {
   return response.body.booking;
 }
 
+async function getDatabaseDate(daysFromToday = 0) {
+  const { rows } = await pool.query(
+    `
+    SELECT TO_CHAR(
+      CURRENT_DATE + $1::integer,
+      'YYYY-MM-DD'
+    ) AS date;
+    `,
+    [daysFromToday],
+  );
+
+  return rows[0].date;
+}
+
 describe("backend API", () => {
   beforeEach(async () => {
     if (!server) {
@@ -149,13 +163,7 @@ describe("backend API", () => {
 
   test("sitter cannot create availability in the past", async () => {
     const data = await seedTestData();
-
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    const yesterdayString = yesterday
-      .toISOString()
-      .slice(0, 10);
+    const yesterdayString = await getDatabaseDate(-1);
 
     const response = await request("/api/availability", {
       method: "POST",
@@ -174,10 +182,9 @@ describe("backend API", () => {
     );
   });
 
-    test("sitter cannot create same-day availability after the start time passed", async () => {
+  test("sitter cannot create same-day availability after the start time passed", async () => {
     const data = await seedTestData();
-
-    const todayString = new Date().toISOString().slice(0, 10);
+    const todayString = await getDatabaseDate();
 
     const response = await request("/api/availability", {
       method: "POST",
@@ -198,12 +205,13 @@ describe("backend API", () => {
 
   test("sitter cannot create overlapping availability", async () => {
     const data = await seedTestData();
+    const overlapDate = await getDatabaseDate(1);
 
     const response = await request("/api/availability", {
       method: "POST",
       headers: authHeader(data.sitter),
       body: JSON.stringify({
-        date: data.availability[0].date,
+        date: overlapDate,
         startTime: "09:15",
         endTime: "09:45",
       }),
@@ -218,6 +226,7 @@ describe("backend API", () => {
 
   test("sitter cannot update availability to overlap another slot", async () => {
     const data = await seedTestData();
+    const overlapDate = await getDatabaseDate(1);
 
     const response = await request(
       `/api/availability/${data.availability[1].id}`,
@@ -225,7 +234,7 @@ describe("backend API", () => {
         method: "PUT",
         headers: authHeader(data.sitter),
         body: JSON.stringify({
-          date: data.availability[0].date,
+          date: overlapDate,
           startTime: "09:15",
           endTime: "09:45",
         }),
@@ -283,6 +292,7 @@ describe("backend API", () => {
 
   test("sitter cannot update availability attached to a booking", async () => {
     const data = await seedTestData();
+    const futureDate = await getDatabaseDate(1);
 
     await createTestBooking(data);
 
@@ -292,7 +302,7 @@ describe("backend API", () => {
         method: "PUT",
         headers: authHeader(data.sitter),
         body: JSON.stringify({
-          date: data.availability[0].date,
+          date: futureDate,
           startTime: "11:00",
           endTime: "11:30",
         }),
