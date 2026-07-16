@@ -6,7 +6,11 @@ const getUserId = (req) => {
 
 function normalizeDateValue(value) {
   if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
   }
 
   return String(value || "").slice(0, 10);
@@ -26,36 +30,6 @@ function isValidDate(value) {
     !Number.isNaN(date.getTime()) &&
     date.toISOString().slice(0, 10) === value
   );
-}
-
-function getTodayString() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function getCurrentTimeString() {
-  const now = new Date();
-  const hours = String(now.getHours()).padStart(2, "0");
-  const minutes = String(now.getMinutes()).padStart(2, "0");
-
-  return `${hours}:${minutes}`;
-}
-
-function isPastDate(value) {
-  return normalizeDateValue(value) < getTodayString();
-}
-
-function isPastDateTime(date, startTime) {
-  const normalizedDate = normalizeDateValue(date);
-
-  if (normalizedDate < getTodayString()) {
-    return true;
-  }
-
-  if (normalizedDate > getTodayString()) {
-    return false;
-  }
-
-  return startTime <= getCurrentTimeString();
 }
 
 function isValidTime(value) {
@@ -90,14 +64,8 @@ function validateAvailabilityFields(
     return "At least one of date, startTime, or endTime is required";
   }
 
-  if (date !== undefined) {
-    if (!isValidDate(date)) {
-      return "date must use YYYY-MM-DD format";
-    }
-
-    if (isPastDate(date)) {
-      return "date cannot be in the past";
-    }
+  if (date !== undefined && !isValidDate(date)) {
+    return "date must use YYYY-MM-DD format";
   }
 
   if (startTime !== undefined && !isValidTime(startTime)) {
@@ -114,6 +82,36 @@ function validateAvailabilityFields(
     !isEndAfterStart(startTime, endTime)
   ) {
     return "endTime must be after startTime";
+  }
+
+  return null;
+}
+
+async function getAvailabilityTimingError(
+  client,
+  date,
+  startTime,
+) {
+  const result = await client.query(
+    `
+    SELECT
+      $1::date < CURRENT_DATE AS "isPastDate",
+      (
+        $1::date = CURRENT_DATE
+        AND $2::time <= LOCALTIME
+      ) AS "isPastStartTime";
+    `,
+    [date, startTime],
+  );
+
+  const timing = result.rows[0];
+
+  if (timing.isPastDate) {
+    return "date cannot be in the past";
+  }
+
+  if (timing.isPastStartTime) {
+    return "startTime cannot be in the past";
   }
 
   return null;
@@ -154,7 +152,11 @@ async function hasAttachedBooking(client, availabilityId) {
   return Boolean(result.rows[0]);
 }
 
-export const getSitterAvailability = async (req, res, next) => {
+export const getSitterAvailability = async (
+  req,
+  res,
+  next,
+) => {
   try {
     const { id } = req.params;
 
@@ -190,7 +192,11 @@ export const getSitterAvailability = async (req, res, next) => {
   }
 };
 
-export const createAvailability = async (req, res, next) => {
+export const createAvailability = async (
+  req,
+  res,
+  next,
+) => {
   const client = await pool.connect();
 
   try {
@@ -208,13 +214,21 @@ export const createAvailability = async (req, res, next) => {
       });
     }
 
-    if (isPastDateTime(date, startTime)) {
+    await client.query("BEGIN");
+
+    const timingError = await getAvailabilityTimingError(
+      client,
+      date,
+      startTime,
+    );
+
+    if (timingError) {
+      await client.query("ROLLBACK");
+
       return res.status(400).json({
-        error: "startTime cannot be in the past",
+        error: timingError,
       });
     }
-
-    await client.query("BEGIN");
 
     const overlappingAvailability =
       await findOverlappingAvailability(client, {
@@ -273,7 +287,11 @@ export const createAvailability = async (req, res, next) => {
   }
 };
 
-export const updateAvailability = async (req, res, next) => {
+export const updateAvailability = async (
+  req,
+  res,
+  next,
+) => {
   const client = await pool.connect();
 
   try {
@@ -298,7 +316,7 @@ export const updateAvailability = async (req, res, next) => {
       `
       SELECT
         id,
-        date,
+        TO_CHAR(date, 'YYYY-MM-DD') AS date,
         start_time AS "startTime",
         end_time AS "endTime"
       FROM availability
@@ -320,7 +338,8 @@ export const updateAvailability = async (req, res, next) => {
       await client.query("ROLLBACK");
 
       return res.status(409).json({
-        error: "Availability slot is attached to a booking and cannot be changed",
+        error:
+          "Availability slot is attached to a booking and cannot be changed",
       });
     }
 
@@ -332,7 +351,12 @@ export const updateAvailability = async (req, res, next) => {
       endTime: endTime ?? existing.endTime,
     };
 
-    if (!isEndAfterStart(nextFields.startTime, nextFields.endTime)) {
+    if (
+      !isEndAfterStart(
+        nextFields.startTime,
+        nextFields.endTime,
+      )
+    ) {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
@@ -340,19 +364,17 @@ export const updateAvailability = async (req, res, next) => {
       });
     }
 
-    if (isPastDate(nextFields.date)) {
+    const timingError = await getAvailabilityTimingError(
+      client,
+      nextFields.date,
+      nextFields.startTime,
+    );
+
+    if (timingError) {
       await client.query("ROLLBACK");
 
       return res.status(400).json({
-        error: "date cannot be in the past",
-      });
-    }
-
-    if (isPastDateTime(nextFields.date, nextFields.startTime)) {
-      await client.query("ROLLBACK");
-
-      return res.status(400).json({
-        error: "startTime cannot be in the past",
+        error: timingError,
       });
     }
 
@@ -418,7 +440,11 @@ export const updateAvailability = async (req, res, next) => {
   }
 };
 
-export const deleteAvailability = async (req, res, next) => {
+export const deleteAvailability = async (
+  req,
+  res,
+  next,
+) => {
   const client = await pool.connect();
 
   try {
@@ -449,7 +475,8 @@ export const deleteAvailability = async (req, res, next) => {
       await client.query("ROLLBACK");
 
       return res.status(409).json({
-        error: "Availability slot is attached to a booking and cannot be deleted",
+        error:
+          "Availability slot is attached to a booking and cannot be deleted",
       });
     }
 
