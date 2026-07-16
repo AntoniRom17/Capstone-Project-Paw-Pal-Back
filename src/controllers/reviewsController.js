@@ -1,35 +1,84 @@
 import { query } from "../db/client.js";
+import {
+  isPlainObject,
+  parseNumber,
+  parsePositiveInteger,
+} from "../utils/validation.js";
 
-export const createReview = async (req, res, next) => {
+export const createReview = async (
+  req,
+  res,
+  next,
+) => {
   try {
-    const ownerId = req.user.id || req.user.userId;
-    const { bookingId, rating, comment } = req.body;
-
-    const numericBookingId = Number(bookingId);
-    const numericRating = Number(rating);
-
-    if (
-      !Number.isInteger(numericBookingId) ||
-      numericBookingId <= 0
-    ) {
+    if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "bookingId must be a positive integer",
+        error: "Request body must be a JSON object",
+      });
+    }
+
+    const ownerId =
+      req.user.id || req.user.userId;
+
+    const {
+      bookingId,
+      rating,
+      comment,
+    } = req.body;
+
+    if (bookingId === undefined) {
+      return res.status(400).json({
+        error: "bookingId is required",
+      });
+    }
+
+    if (rating === undefined) {
+      return res.status(400).json({
+        error: "rating is required",
+      });
+    }
+
+    const numericBookingId =
+      parsePositiveInteger(bookingId);
+
+    if (!numericBookingId) {
+      return res.status(400).json({
+        error:
+          "bookingId must be a positive integer",
+      });
+    }
+
+    const numericRating = parseNumber(rating, {
+      min: 1,
+      max: 5,
+      integer: true,
+      allowString: false,
+    });
+
+    if (numericRating === null) {
+      return res.status(400).json({
+        error:
+          "rating must be an integer between 1 and 5",
       });
     }
 
     if (
-      !Number.isInteger(numericRating) ||
-      numericRating < 1 ||
-      numericRating > 5
+      comment !== undefined &&
+      comment !== null &&
+      typeof comment !== "string"
     ) {
       return res.status(400).json({
-        error: "rating must be an integer between 1 and 5",
+        error: "comment must be a string or null",
       });
     }
 
-    if (comment !== undefined && typeof comment !== "string") {
+    if (
+      typeof comment === "string" &&
+      comment.trim().length > 2000
+    ) {
       return res.status(400).json({
-        error: "comment must be a string",
+        error:
+          "comment cannot exceed 2000 characters",
       });
     }
 
@@ -62,7 +111,8 @@ export const createReview = async (req, res, next) => {
 
     if (booking.status !== "completed") {
       return res.status(400).json({
-        error: "Only completed bookings can be reviewed",
+        error:
+          "Only completed bookings can be reviewed",
       });
     }
 
@@ -77,12 +127,14 @@ export const createReview = async (req, res, next) => {
 
     if (existingReview.rows.length > 0) {
       return res.status(409).json({
-        error: "This booking has already been reviewed",
+        error:
+          "This booking has already been reviewed",
       });
     }
 
     const normalizedComment =
-      typeof comment === "string" && comment.trim()
+      typeof comment === "string" &&
+      comment.trim()
         ? comment.trim()
         : null;
 
@@ -130,7 +182,8 @@ export const createReview = async (req, res, next) => {
   } catch (error) {
     if (error.code === "23505") {
       return res.status(409).json({
-        error: "This booking has already been reviewed",
+        error:
+          "This booking has already been reviewed",
       });
     }
 
