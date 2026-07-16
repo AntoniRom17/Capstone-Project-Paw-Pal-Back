@@ -23,7 +23,8 @@ CREATE TABLE users (
   zip_code VARCHAR(10) NOT NULL,
   trust_score INTEGER
     CHECK (trust_score BETWEEN 0 AND 100),
-  background_check_status VARCHAR(20) NOT NULL DEFAULT 'not_submitted'
+  background_check_status VARCHAR(20) NOT NULL
+    DEFAULT 'not_submitted'
     CHECK (
       background_check_status IN (
         'not_submitted',
@@ -34,7 +35,20 @@ CREATE TABLE users (
     ),
   on_time_percentage INTEGER
     CHECK (on_time_percentage BETWEEN 0 AND 100),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  deactivated_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (
+    (
+      is_active = true
+      AND deactivated_at IS NULL
+    )
+    OR
+    (
+      is_active = false
+      AND deactivated_at IS NOT NULL
+    )
+  )
 );
 
 CREATE TABLE pets (
@@ -79,7 +93,12 @@ CREATE TABLE availability (
   is_booked BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (end_time > start_time),
-  UNIQUE (sitter_id, date, start_time, end_time),
+  UNIQUE (
+    sitter_id,
+    date,
+    start_time,
+    end_time
+  ),
   EXCLUDE USING gist (
     sitter_id WITH =,
     date WITH =,
@@ -143,15 +162,22 @@ CREATE TABLE messages (
     REFERENCES users(id),
   body TEXT NOT NULL
     CHECK (
-      CHAR_LENGTH(BTRIM(body)) BETWEEN 1 AND 2000
+      CHAR_LENGTH(BTRIM(body))
+      BETWEEN 1 AND 2000
     ),
   read_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK (sender_id <> recipient_id)
 );
 
-CREATE INDEX idx_users_sitter_location
-  ON users (role, city, state, zip_code);
+CREATE INDEX idx_users_active_sitter_location
+  ON users (
+    role,
+    is_active,
+    city,
+    state,
+    zip_code
+  );
 
 CREATE INDEX idx_pets_owner_id
   ON pets (owner_id);
@@ -168,13 +194,21 @@ CREATE INDEX idx_bookings_owner_id
 CREATE INDEX idx_bookings_sitter_id
   ON bookings (sitter_id);
 
-CREATE UNIQUE INDEX idx_one_active_booking_per_availability
+CREATE UNIQUE INDEX
+  idx_one_active_booking_per_availability
   ON bookings (availability_id)
   WHERE status IN ('accepted', 'completed');
 
 CREATE INDEX idx_messages_booking_created_at
-  ON messages (booking_id, created_at, id);
+  ON messages (
+    booking_id,
+    created_at,
+    id
+  );
 
 CREATE INDEX idx_messages_unread_recipient
-  ON messages (recipient_id, created_at)
+  ON messages (
+    recipient_id,
+    created_at
+  )
   WHERE read_at IS NULL;
