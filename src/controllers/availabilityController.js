@@ -1,69 +1,202 @@
-import { query } from "../db/client.js";
+import { pool, query } from "../db/client.js";
+import {
+  isPlainObject,
+  isValidDate,
+  isValidTime,
+  parsePositiveInteger,
+} from "../utils/validation.js";
 
 const getUserId = (req) => {
   return req.user.id || req.user.userId;
 };
 
-function isValidDate(value) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
+function normalizeDateValue(value) {
+  if (value instanceof Date) {
+    const year = value.getFullYear();
+
+    const month = String(
+      value.getMonth() + 1,
+    ).padStart(2, "0");
+
+    const day = String(
+      value.getDate(),
+    ).padStart(2, "0");
+
+    return `${year}-${month}-${day}`;
   }
 
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  return String(value || "").slice(0, 10);
 }
 
-function isPastDate(value) {
-  const today = new Date();
-  const todayString = today.toISOString().slice(0, 10);
-  return value < todayString;
-}
-
-function isValidTime(value) {
-  return typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
-}
-
-function isEndAfterStart(startTime, endTime) {
+function isEndAfterStart(
+  startTime,
+  endTime,
+) {
   return endTime > startTime;
 }
 
-function validateAvailabilityFields({ date, startTime, endTime }, requireAll = true) {
-  if (requireAll && (!date || !startTime || !endTime)) {
-    return "date, startTime, and endTime are required";
+function isAvailabilityConflict(error) {
+  return (
+    error.code === "23505" ||
+    error.code === "23P01"
+  );
+}
+
+function validateAvailabilityFields(
+  { date, startTime, endTime },
+  requireAll = true,
+) {
+  if (
+    requireAll &&
+    (!date || !startTime || !endTime)
+  ) {
+    return (
+      "date, startTime, and endTime " +
+      "are required"
+    );
   }
 
-  if (!requireAll && date === undefined && startTime === undefined && endTime === undefined) {
-    return "At least one of date, startTime, or endTime is required";
+  if (
+    !requireAll &&
+    date === undefined &&
+    startTime === undefined &&
+    endTime === undefined
+  ) {
+    return (
+      "At least one of date, startTime, " +
+      "or endTime is required"
+    );
   }
 
-  if (date !== undefined) {
-    if (!isValidDate(date)) {
-      return "date must use YYYY-MM-DD format";
-    }
-
-    if (isPastDate(date)) {
-      return "date cannot be in the past";
-    }
+  if (
+    date !== undefined &&
+    !isValidDate(date)
+  ) {
+    return "date must use YYYY-MM-DD format";
   }
 
-  if (startTime !== undefined && !isValidTime(startTime)) {
+  if (
+    startTime !== undefined &&
+    !isValidTime(startTime)
+  ) {
     return "startTime must use HH:MM format";
   }
 
-  if (endTime !== undefined && !isValidTime(endTime)) {
+  if (
+    endTime !== undefined &&
+    !isValidTime(endTime)
+  ) {
     return "endTime must use HH:MM format";
   }
 
-  if (startTime !== undefined && endTime !== undefined && !isEndAfterStart(startTime, endTime)) {
+  if (
+    startTime !== undefined &&
+    endTime !== undefined &&
+    !isEndAfterStart(startTime, endTime)
+  ) {
     return "endTime must be after startTime";
   }
 
   return null;
 }
 
-export const getSitterAvailability = async (req, res, next) => {
+async function getAvailabilityTimingError(
+  client,
+  date,
+  startTime,
+) {
+  const result = await client.query(
+    `
+    SELECT
+      $1::date < CURRENT_DATE AS "isPastDate",
+      (
+        $1::date = CURRENT_DATE
+        AND $2::time <= LOCALTIME
+      ) AS "isPastStartTime";
+    `,
+    [date, startTime],
+  );
+
+  const timing = result.rows[0];
+
+  if (timing.isPastDate) {
+    return "date cannot be in the past";
+  }
+
+  if (timing.isPastStartTime) {
+    return "startTime cannot be in the past";
+  }
+
+  return null;
+}
+
+async function findOverlappingAvailability(
+  client,
+  {
+    sitterId,
+    date,
+    startTime,
+    endTime,
+    excludeId = null,
+  },
+) {
+  const result = await client.query(
+    `
+    SELECT id
+    FROM availability
+    WHERE sitter_id = $1
+      AND date = $2
+      AND (
+        $5::integer IS NULL
+        OR id <> $5::integer
+      )
+      AND start_time < $4::time
+      AND end_time > $3::time
+    LIMIT 1;
+    `,
+    [
+      sitterId,
+      date,
+      startTime,
+      endTime,
+      excludeId,
+    ],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function hasAttachedBooking(
+  client,
+  availabilityId,
+) {
+  const result = await client.query(
+    `
+    SELECT id
+    FROM bookings
+    WHERE availability_id = $1
+    LIMIT 1;
+    `,
+    [availabilityId],
+  );
+
+  return Boolean(result.rows[0]);
+}
+
+export const getSitterAvailability = async (
+  req,
+  res,
+  next,
+) => {
   try {
-    const { id } = req.params;
+    const sitterId =
+      parsePositiveInteger(req.params.id);
+
+    if (!sitterId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
 
     const result = await query(
       `
@@ -76,11 +209,25 @@ export const getSitterAvailability = async (req, res, next) => {
         is_booked AS "isBooked"
       FROM availability
       WHERE sitter_id = $1
-        AND date >= CURRENT_DATE
+        AND EXISTS (
+          SELECT 1
+          FROM users
+          WHERE users.id =
+            availability.sitter_id
+            AND users.role = 'sitter'
+            AND users.is_active = true
+        )
+        AND (
+          date > CURRENT_DATE
+          OR (
+            date = CURRENT_DATE
+            AND start_time > LOCALTIME
+          )
+        )
         AND is_booked = false
       ORDER BY date ASC, start_time ASC;
       `,
-      [id],
+      [sitterId],
     );
 
     res.json({
@@ -91,15 +238,38 @@ export const getSitterAvailability = async (req, res, next) => {
   }
 };
 
-export const createAvailability = async (req, res, next) => {
-  try {
-    const sitterId = getUserId(req);
-    const { date, startTime, endTime } = req.body;
+export const createAvailability = async (
+  req,
+  res,
+  next,
+) => {
+  const client = await pool.connect();
 
-    const validationError = validateAvailabilityFields(
-      { date, startTime, endTime },
-      true,
-    );
+  try {
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error:
+          "Request body must be a JSON object",
+      });
+    }
+
+    const sitterId = getUserId(req);
+
+    const {
+      date,
+      startTime,
+      endTime,
+    } = req.body;
+
+    const validationError =
+      validateAvailabilityFields(
+        {
+          date,
+          startTime,
+          endTime,
+        },
+        true,
+      );
 
     if (validationError) {
       return res.status(400).json({
@@ -107,7 +277,44 @@ export const createAvailability = async (req, res, next) => {
       });
     }
 
-    const result = await query(
+    await client.query("BEGIN");
+
+    const timingError =
+      await getAvailabilityTimingError(
+        client,
+        date,
+        startTime,
+      );
+
+    if (timingError) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error: timingError,
+      });
+    }
+
+    const overlappingAvailability =
+      await findOverlappingAvailability(
+        client,
+        {
+          sitterId,
+          date,
+          startTime,
+          endTime,
+        },
+      );
+
+    if (overlappingAvailability) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        error:
+          "Availability slot overlaps an existing slot",
+      });
+    }
+
+    const result = await client.query(
       `
       INSERT INTO availability (
         sitter_id,
@@ -125,59 +332,76 @@ export const createAvailability = async (req, res, next) => {
         end_time AS "endTime",
         is_booked AS "isBooked";
       `,
-      [sitterId, date, startTime, endTime],
+      [
+        sitterId,
+        date,
+        startTime,
+        endTime,
+      ],
     );
+
+    await client.query("COMMIT");
 
     res.status(201).json({
       availability: result.rows[0],
     });
   } catch (error) {
-    if (error.code === "23505") {
+    await client.query("ROLLBACK");
+
+    if (isAvailabilityConflict(error)) {
       return res.status(409).json({
-        error: "Availability slot already exists",
+        error:
+          "Availability slot overlaps an existing slot",
       });
     }
 
     next(error);
+  } finally {
+    client.release();
   }
 };
 
-export const updateAvailability = async (req, res, next) => {
+export const updateAvailability = async (
+  req,
+  res,
+  next,
+) => {
+  const client = await pool.connect();
+
   try {
     const sitterId = getUserId(req);
-    const { id } = req.params;
-    const { date, startTime, endTime } = req.body;
 
-    const existingResult = await query(
-      `
-      SELECT
-        date,
-        start_time AS "startTime",
-        end_time AS "endTime"
-      FROM availability
-      WHERE id = $1 AND sitter_id = $2;
-      `,
-      [id, sitterId],
-    );
+    const availabilityId =
+      parsePositiveInteger(req.params.id);
 
-    if (existingResult.rows.length === 0) {
-      return res.status(404).json({
-        error: "Availability slot not found",
+    if (!availabilityId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
       });
     }
 
-    const existing = existingResult.rows[0];
+    if (!isPlainObject(req.body)) {
+      return res.status(400).json({
+        error:
+          "Request body must be a JSON object",
+      });
+    }
 
-    const nextFields = {
-      date: date ?? existing.date,
-      startTime: startTime ?? existing.startTime,
-      endTime: endTime ?? existing.endTime,
-    };
+    const {
+      date,
+      startTime,
+      endTime,
+    } = req.body;
 
-    const validationError = validateAvailabilityFields(
-      { date, startTime, endTime },
-      false,
-    );
+    const validationError =
+      validateAvailabilityFields(
+        {
+          date,
+          startTime,
+          endTime,
+        },
+        false,
+      );
 
     if (validationError) {
       return res.status(400).json({
@@ -185,26 +409,122 @@ export const updateAvailability = async (req, res, next) => {
       });
     }
 
-    if (!isEndAfterStart(nextFields.startTime, nextFields.endTime)) {
-      return res.status(400).json({
-        error: "endTime must be after startTime",
+    await client.query("BEGIN");
+
+    const existingResult =
+      await client.query(
+        `
+        SELECT
+          id,
+          TO_CHAR(
+            date,
+            'YYYY-MM-DD'
+          ) AS date,
+          start_time AS "startTime",
+          end_time AS "endTime"
+        FROM availability
+        WHERE id = $1
+          AND sitter_id = $2
+        FOR UPDATE;
+        `,
+        [availabilityId, sitterId],
+      );
+
+    if (existingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+
+      return res.status(404).json({
+        error: "Availability slot not found",
       });
     }
 
-    if (isPastDate(nextFields.date)) {
-      return res.status(400).json({
-        error: "date cannot be in the past",
+    if (
+      await hasAttachedBooking(
+        client,
+        availabilityId,
+      )
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        error:
+          "Availability slot is attached to a booking and cannot be changed",
       });
     }
 
-    const result = await query(
+    const existing =
+      existingResult.rows[0];
+
+    const nextFields = {
+      date:
+        date ??
+        normalizeDateValue(existing.date),
+      startTime:
+        startTime ?? existing.startTime,
+      endTime:
+        endTime ?? existing.endTime,
+    };
+
+    if (
+      !isEndAfterStart(
+        nextFields.startTime,
+        nextFields.endTime,
+      )
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error:
+          "endTime must be after startTime",
+      });
+    }
+
+    const timingError =
+      await getAvailabilityTimingError(
+        client,
+        nextFields.date,
+        nextFields.startTime,
+      );
+
+    if (timingError) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error: timingError,
+      });
+    }
+
+    const overlappingAvailability =
+      await findOverlappingAvailability(
+        client,
+        {
+          sitterId,
+          date: nextFields.date,
+          startTime:
+            nextFields.startTime,
+          endTime: nextFields.endTime,
+          excludeId: availabilityId,
+        },
+      );
+
+    if (overlappingAvailability) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        error:
+          "Availability slot overlaps an existing slot",
+      });
+    }
+
+    const result = await client.query(
       `
       UPDATE availability
       SET
         date = $1,
         start_time = $2,
         end_time = $3
-      WHERE id = $4 AND sitter_id = $5
+      WHERE id = $4
+        AND sitter_id = $5
       RETURNING
         id,
         sitter_id AS "sitterId",
@@ -213,47 +533,110 @@ export const updateAvailability = async (req, res, next) => {
         end_time AS "endTime",
         is_booked AS "isBooked";
       `,
-      [nextFields.date, nextFields.startTime, nextFields.endTime, id, sitterId],
+      [
+        nextFields.date,
+        nextFields.startTime,
+        nextFields.endTime,
+        availabilityId,
+        sitterId,
+      ],
     );
+
+    await client.query("COMMIT");
 
     res.json({
       availability: result.rows[0],
     });
   } catch (error) {
-    if (error.code === "23505") {
+    await client.query("ROLLBACK");
+
+    if (isAvailabilityConflict(error)) {
       return res.status(409).json({
-        error: "Availability slot already exists",
+        error:
+          "Availability slot overlaps an existing slot",
       });
     }
 
     next(error);
+  } finally {
+    client.release();
   }
 };
 
-export const deleteAvailability = async (req, res, next) => {
+export const deleteAvailability = async (
+  req,
+  res,
+  next,
+) => {
+  const client = await pool.connect();
+
   try {
     const sitterId = getUserId(req);
-    const { id } = req.params;
 
-    const result = await query(
-      `
-      DELETE FROM availability
-      WHERE id = $1 AND sitter_id = $2
-      RETURNING id;
-      `,
-      [id, sitterId],
-    );
+    const availabilityId =
+      parsePositiveInteger(req.params.id);
 
-    if (result.rows.length === 0) {
+    if (!availabilityId) {
+      return res.status(400).json({
+        error: "id must be a positive integer",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    const existingResult =
+      await client.query(
+        `
+        SELECT id
+        FROM availability
+        WHERE id = $1
+          AND sitter_id = $2
+        FOR UPDATE;
+        `,
+        [availabilityId, sitterId],
+      );
+
+    if (existingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+
       return res.status(404).json({
         error: "Availability slot not found",
       });
     }
 
+    if (
+      await hasAttachedBooking(
+        client,
+        availabilityId,
+      )
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(409).json({
+        error:
+          "Availability slot is attached to a booking and cannot be deleted",
+      });
+    }
+
+    await client.query(
+      `
+      DELETE FROM availability
+      WHERE id = $1
+        AND sitter_id = $2;
+      `,
+      [availabilityId, sitterId],
+    );
+
+    await client.query("COMMIT");
+
     res.json({
-      message: "Availability deleted successfully",
+      message:
+        "Availability deleted successfully",
     });
   } catch (error) {
+    await client.query("ROLLBACK");
     next(error);
+  } finally {
+    client.release();
   }
 };

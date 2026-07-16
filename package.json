@@ -4,10 +4,11 @@
   "description": "",
   "main": "src/index.js",
   "scripts": {
-    "test": "node --require ./test/setup-env.cjs --test",
+    "test": "node --require ./test/setup-env.cjs --test --test-concurrency=1",
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "db:test": "node src/db/testConnection.js",
+    "db:migrate": "node src/db/migrate.js",
     "db:reset": "node src/db/reset.js",
     "db:seed": "node src/db/seed.js"
   },

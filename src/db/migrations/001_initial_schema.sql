@@ -1,15 +1,4 @@
-CREATE EXTENSION IF NOT EXISTS btree_gist;
-
-DROP TABLE IF EXISTS messages CASCADE;
-DROP TABLE IF EXISTS reviews CASCADE;
-DROP TABLE IF EXISTS bookings CASCADE;
-DROP TABLE IF EXISTS availability CASCADE;
-DROP TABLE IF EXISTS sitter_services CASCADE;
-DROP TABLE IF EXISTS services CASCADE;
-DROP TABLE IF EXISTS pets CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
-
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   name VARCHAR(100) NOT NULL,
   email VARCHAR(255) UNIQUE NOT NULL,
@@ -35,23 +24,10 @@ CREATE TABLE users (
     ),
   on_time_percentage INTEGER
     CHECK (on_time_percentage BETWEEN 0 AND 100),
-  is_active BOOLEAN NOT NULL DEFAULT true,
-  deactivated_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  CHECK (
-    (
-      is_active = true
-      AND deactivated_at IS NULL
-    )
-    OR
-    (
-      is_active = false
-      AND deactivated_at IS NOT NULL
-    )
-  )
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE pets (
+CREATE TABLE IF NOT EXISTS pets (
   id SERIAL PRIMARY KEY,
   owner_id INTEGER NOT NULL
     REFERENCES users(id) ON DELETE CASCADE,
@@ -64,7 +40,7 @@ CREATE TABLE pets (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE services (
+CREATE TABLE IF NOT EXISTS services (
   id SERIAL PRIMARY KEY,
   name VARCHAR(50) UNIQUE NOT NULL,
   description TEXT,
@@ -72,7 +48,7 @@ CREATE TABLE services (
     CHECK (base_price >= 0)
 );
 
-CREATE TABLE sitter_services (
+CREATE TABLE IF NOT EXISTS sitter_services (
   id SERIAL PRIMARY KEY,
   sitter_id INTEGER NOT NULL
     REFERENCES users(id) ON DELETE CASCADE,
@@ -83,7 +59,7 @@ CREATE TABLE sitter_services (
   UNIQUE (sitter_id, service_id)
 );
 
-CREATE TABLE availability (
+CREATE TABLE IF NOT EXISTS availability (
   id SERIAL PRIMARY KEY,
   sitter_id INTEGER NOT NULL
     REFERENCES users(id) ON DELETE CASCADE,
@@ -98,19 +74,10 @@ CREATE TABLE availability (
     date,
     start_time,
     end_time
-  ),
-  EXCLUDE USING gist (
-    sitter_id WITH =,
-    date WITH =,
-    tsrange(
-      date + start_time,
-      date + end_time,
-      '[)'
-    ) WITH &&
   )
 );
 
-CREATE TABLE bookings (
+CREATE TABLE IF NOT EXISTS bookings (
   id SERIAL PRIMARY KEY,
   owner_id INTEGER NOT NULL
     REFERENCES users(id),
@@ -140,7 +107,7 @@ CREATE TABLE bookings (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE reviews (
+CREATE TABLE IF NOT EXISTS reviews (
   id SERIAL PRIMARY KEY,
   booking_id INTEGER UNIQUE NOT NULL
     REFERENCES bookings(id) ON DELETE CASCADE,
@@ -148,12 +115,11 @@ CREATE TABLE reviews (
     REFERENCES users(id),
   rating INTEGER NOT NULL
     CHECK (rating BETWEEN 1 AND 5),
-  was_on_time BOOLEAN,
   comment TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
   id SERIAL PRIMARY KEY,
   booking_id INTEGER NOT NULL
     REFERENCES bookings(id) ON DELETE CASCADE,
@@ -171,43 +137,53 @@ CREATE TABLE messages (
   CHECK (sender_id <> recipient_id)
 );
 
-CREATE INDEX idx_users_active_sitter_location
+CREATE INDEX IF NOT EXISTS
+  idx_users_sitter_location
   ON users (
     role,
-    is_active,
     city,
     state,
     zip_code
   );
 
-CREATE INDEX idx_pets_owner_id
+CREATE INDEX IF NOT EXISTS
+  idx_pets_owner_id
   ON pets (owner_id);
 
-CREATE INDEX idx_sitter_services_sitter_id
+CREATE INDEX IF NOT EXISTS
+  idx_sitter_services_sitter_id
   ON sitter_services (sitter_id);
 
-CREATE INDEX idx_availability_sitter_date
+CREATE INDEX IF NOT EXISTS
+  idx_availability_sitter_date
   ON availability (sitter_id, date);
 
-CREATE INDEX idx_bookings_owner_id
+CREATE INDEX IF NOT EXISTS
+  idx_bookings_owner_id
   ON bookings (owner_id);
 
-CREATE INDEX idx_bookings_sitter_id
+CREATE INDEX IF NOT EXISTS
+  idx_bookings_sitter_id
   ON bookings (sitter_id);
 
-CREATE UNIQUE INDEX
+CREATE UNIQUE INDEX IF NOT EXISTS
   idx_one_active_booking_per_availability
   ON bookings (availability_id)
-  WHERE status IN ('accepted', 'completed');
+  WHERE status IN (
+    'accepted',
+    'completed'
+  );
 
-CREATE INDEX idx_messages_booking_created_at
+CREATE INDEX IF NOT EXISTS
+  idx_messages_booking_created_at
   ON messages (
     booking_id,
     created_at,
     id
   );
 
-CREATE INDEX idx_messages_unread_recipient
+CREATE INDEX IF NOT EXISTS
+  idx_messages_unread_recipient
   ON messages (
     recipient_id,
     created_at

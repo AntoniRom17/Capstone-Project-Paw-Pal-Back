@@ -1,0 +1,3 @@
+ALTER TABLE reviews
+  ADD COLUMN IF NOT EXISTS
+    was_on_time BOOLEAN;

@@ -14,6 +14,43 @@ const databaseSchema = fs.readFileSync(
   "utf8",
 );
 
+function getDatabaseName(databaseUrl) {
+  try {
+    const parsedUrl = new URL(databaseUrl);
+    return decodeURIComponent(parsedUrl.pathname.replace(/^\/+/, ""));
+  } catch {
+    return "";
+  }
+}
+
+function assertSafeResetDatabase() {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error(
+      "Refusing to reset the database outside NODE_ENV=test.",
+    );
+  }
+
+  if (!process.env.TEST_DATABASE_URL) {
+    throw new Error(
+      "Refusing to reset the database because TEST_DATABASE_URL is not set.",
+    );
+  }
+
+  if (process.env.DATABASE_URL !== process.env.TEST_DATABASE_URL) {
+    throw new Error(
+      "Refusing to reset the database because DATABASE_URL is not using TEST_DATABASE_URL.",
+    );
+  }
+
+  const databaseName = getDatabaseName(process.env.DATABASE_URL);
+
+  if (!databaseName.toLowerCase().includes("test")) {
+    throw new Error(
+      `Refusing to reset database '${databaseName}' because its name does not include 'test'.`,
+    );
+  }
+}
+
 export async function startTestServer() {
   const server = app.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
@@ -54,6 +91,7 @@ export function authHeader(user) {
 }
 
 export async function resetTestDatabase() {
+  assertSafeResetDatabase();
   await pool.query(databaseSchema);
 }
 
