@@ -20,7 +20,6 @@ const upload = multer({
     fileSize: PET_PHOTO_MAX_BYTES,
     files: 1,
     fields: 0,
-    parts: 1,
   },
   fileFilter: (
     req,
