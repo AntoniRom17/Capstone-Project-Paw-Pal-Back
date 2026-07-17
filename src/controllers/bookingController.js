@@ -433,9 +433,17 @@ export async function updateBookingStatus(
     const { rows: bookingRows } =
       await client.query(
         `
-        SELECT *
-        FROM bookings
-        WHERE id = $1
+        SELECT
+          b.*,
+          (
+            b.date < CURRENT_DATE
+            OR (
+              b.date = CURRENT_DATE
+              AND b.end_time <= LOCALTIME
+            )
+          ) AS "hasEnded"
+        FROM bookings b
+        WHERE b.id = $1
         FOR UPDATE;
         `,
         [bookingId],
@@ -513,6 +521,18 @@ export async function updateBookingStatus(
         error:
           `Cannot go from '${booking.status}' ` +
           `to '${normalizedStatus}'`,
+      });
+    }
+
+    if (
+      normalizedStatus === "completed" &&
+      !booking.hasEnded
+    ) {
+      await client.query("ROLLBACK");
+
+      return res.status(400).json({
+        error:
+          "Booking cannot be completed before its scheduled end time",
       });
     }
 

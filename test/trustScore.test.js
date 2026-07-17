@@ -98,6 +98,22 @@ async function completeTestBooking(
 
   assert.equal(acceptedResponse.status, 200);
 
+  await pool.query(
+    `
+    WITH updated_booking AS (
+      UPDATE bookings
+      SET date = CURRENT_DATE - 1
+      WHERE id = $1
+      RETURNING availability_id
+    )
+    UPDATE availability a
+    SET date = CURRENT_DATE - 1
+    FROM updated_booking b
+    WHERE a.id = b.availability_id;
+    `,
+    [booking.id],
+  );
+
   const completedResponse = await request(
     `/api/bookings/${booking.id}/status`,
     {
