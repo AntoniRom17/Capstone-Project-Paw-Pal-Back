@@ -160,7 +160,7 @@ This includes:
 - Determining when bookings may be completed
 - Generating dates used by database seed data
 
-Every PostgreSQL connection is configured with `APP_TIME_ZONE`, so behavior does not depend on the operating system or database server’s default timezone.
+Every PostgreSQL connection is configured with `APP_TIME_ZONE`, so behavior does not depend on the operating system or database server's default timezone.
 
 When `APP_TIME_ZONE` is omitted, the backend defaults to:
 
@@ -209,7 +209,7 @@ Malformed request bodies and invalid route IDs return `400 Bad Request`. Validat
 
 Public sitter endpoints expose information needed for sitter discovery, including names, bios, locations, services, availability, ratings, Trust Scores, and profile-photo state.
 
-Public sitter responses do not expose phone numbers. A user’s phone number remains available through their own authenticated account response:
+Public sitter responses do not expose phone numbers. A user's phone number remains available through their own authenticated account response:
 
 ```http
 GET /api/users/me
@@ -248,7 +248,7 @@ PATCH /api/users/me/password
 DELETE /api/users/me
 ```
 
-`GET /api/users/me` returns the authenticated user’s private account information, including their own email and phone number.
+`GET /api/users/me` returns the authenticated user's private account information, including their own email and phone number.
 
 ### Profile Photos
 
@@ -464,8 +464,10 @@ Booking rules:
 - Sitters can accept, decline, or complete bookings.
 - Owners can cancel eligible bookings.
 - Accepted bookings cannot be completed before their scheduled end time.
-- Availability is marked booked when a booking is created.
-- Declined bookings release availability.
+- Pending, accepted, and completed bookings reserve their availability slot.
+- Only one pending, accepted, or completed booking may reference an availability slot.
+- Declined and cancelled bookings release availability for a replacement booking.
+- The active-booking rule is enforced by PostgreSQL as well as the API.
 - Date and time values use `APP_TIME_ZONE`.
 
 ### Reviews
@@ -534,6 +536,8 @@ Apply pending migrations with:
 npm run db:migrate
 ```
 
+Migration `007_include_pending_active_bookings.sql` upgrades existing databases so pending bookings participate in the active-booking uniqueness rule.
+
 Main tables include:
 
 ```text
@@ -548,6 +552,14 @@ messages
 schema_migrations
 ```
 
+The partial unique index:
+
+```text
+idx_one_active_booking_per_availability
+```
+
+allows only one `pending`, `accepted`, or `completed` booking per availability slot.
+
 Uploaded image files are stored on the filesystem.
 
 PostgreSQL stores only generated filenames and verified content types. API responses expose only `hasPhoto` or `hasProfilePhoto` booleans.
@@ -559,6 +571,7 @@ Backend tests are located in:
 ```text
 test/backend.test.js
 test/bookingCompletion.test.js
+test/bookingUniqueness.test.js
 test/messageValidation.test.js
 test/migrations.test.js
 test/petPhotos.test.js
@@ -590,6 +603,8 @@ The test suite covers:
 - Availability validation and overlap protection
 - Booking creation and status transitions
 - Booking completion timing
+- Active booking uniqueness for pending, accepted, and completed bookings
+- Availability release after declined and cancelled bookings
 - Application and PostgreSQL timezone configuration
 - PostgreSQL calendar-date serialization
 - Sitter service management
@@ -604,7 +619,7 @@ The test suite covers:
 - Database migration safety and rollback behavior
 - Destructive database reset protection
 
-The current suite contains 94 tests.
+The current suite contains 97 tests.
 
 ## Uploaded Photo Storage
 
@@ -631,6 +646,7 @@ Generated upload filenames must never be accepted directly from API clients.
 - SQL queries use the `pg` PostgreSQL client.
 - Database sessions use `APP_TIME_ZONE`.
 - PostgreSQL calendar dates remain `YYYY-MM-DD` strings.
+- Pending bookings reserve availability at the database level.
 - Public sitter endpoints do not expose phone numbers.
 - Authenticated users can retrieve their own private profile data.
 - Pet and profile photos use generated UUID filenames.

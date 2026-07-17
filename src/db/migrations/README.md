@@ -24,7 +24,7 @@ The migration runner:
 When a schema change is needed, create the next numbered SQL file:
 
 ```powershell
-New-Item -ItemType File -Path src\db\migrations\007_describe_the_change.sql
+New-Item -ItemType File -Path src\db\migrations\008_describe_the_change.sql
 ```
 
 Migration filenames must use this format:
@@ -42,6 +42,7 @@ Current application migrations:
 004_add_review_punctuality.sql
 005_replace_pet_photo_urls.sql
 006_add_user_profile_photos.sql
+007_include_pending_active_bookings.sql
 ```
 
 A future migration might contain SQL such as:
@@ -60,6 +61,30 @@ Replace the example table, column, and index names with the names required by th
 
 Never add `DROP TABLE` statements to a deployment migration unless permanent data deletion is explicitly intended and reviewed.
 
+## Active Booking Protection
+
+Migration `007_include_pending_active_bookings.sql` updates the partial unique index:
+
+```text
+idx_one_active_booking_per_availability
+```
+
+The index permits only one booking with any of these statuses for an availability slot:
+
+```text
+pending
+accepted
+completed
+```
+
+Bookings with these statuses reserve the availability slot at the database level.
+
+Declined and cancelled bookings are excluded from the partial index, allowing a replacement booking after the slot is released.
+
+Before replacing the index, migration `007` checks for historical duplicate active bookings. If duplicates exist, the migration fails without deleting or changing booking data.
+
+Resolve conflicting records manually before rerunning the migration.
+
 ## Applied Migrations
 
 Never edit, rename, or delete a migration after it has been applied to a shared database.
@@ -71,6 +96,12 @@ Create a new numbered migration for every later schema change.
 ## Local Reset Script
 
 `npm run db:reset` executes `src/db/schema.sql`, which drops and rebuilds all application tables.
+
+The reset command only runs when:
+
+- `NODE_ENV` is `development`.
+- The target is not a reserved PostgreSQL database.
+- `CONFIRM_DATABASE_RESET` exactly matches the target database name.
 
 Use the reset script only for disposable local databases. Never use it to update staging or production.
 
