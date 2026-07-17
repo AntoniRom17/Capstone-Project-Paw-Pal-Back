@@ -99,19 +99,44 @@ Apply non-destructive database migrations:
 npm run db:migrate
 ```
 
-Reset the local database schema:
-
-```bash
-npm run db:reset
-```
-
 Seed the database:
 
 ```bash
 npm run db:seed
 ```
 
-Warning: `npm run db:reset` drops and recreates the PawPal database tables. Use migrations when updating an existing database.
+### Reset the Development Database
+
+`npm run db:reset` is destructive. It drops and recreates the PawPal database tables using `src/db/schema.sql`.
+
+The reset command refuses to run unless:
+
+- `NODE_ENV` is exactly `development`.
+- `DATABASE_URL` contains a database name.
+- The database is not `postgres`, `template0`, or `template1`.
+- `CONFIRM_DATABASE_RESET` exactly matches the database name from `DATABASE_URL`.
+
+For a development database named `pawpal`, run the following in PowerShell:
+
+```powershell
+$env:CONFIRM_DATABASE_RESET = "pawpal"
+npm run db:reset
+Remove-Item Env:\CONFIRM_DATABASE_RESET
+```
+
+On macOS or Linux:
+
+```bash
+CONFIRM_DATABASE_RESET=pawpal npm run db:reset
+```
+
+Do not store `CONFIRM_DATABASE_RESET` permanently in `.env`. It is intentionally a one-time confirmation for each destructive reset.
+
+Use migrations instead of `db:reset` when updating an existing or deployed database:
+
+```bash
+npm run db:migrate
+```
 
 ## API Base URL
 
@@ -462,6 +487,7 @@ test/backend.test.js
 test/migrations.test.js
 test/petPhotos.test.js
 test/profilePhotos.test.js
+test/resetSafety.test.js
 test/trustScore.test.js
 ```
 
@@ -491,8 +517,9 @@ The test suite covers:
 - Background-check workflows
 - Message authentication and permissions
 - Database migration safety and rollback behavior
+- Destructive database reset protection
 
-The current suite contains 71 tests.
+The current suite contains 80 tests.
 
 ## Uploaded Photo Storage
 
