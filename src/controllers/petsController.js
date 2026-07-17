@@ -1,12 +1,20 @@
-import { query } from "../db/client.js";
+import {
+  pool,
+  query,
+} from "../db/client.js";
 import {
   hasOwn,
   isPlainObject,
   isStringWithinLength,
-  isValidHttpUrl,
   parseNumber,
   parsePositiveInteger,
 } from "../utils/validation.js";
+import {
+  deletePetPhoto,
+  PetPhotoStorageError,
+  readPetPhoto,
+  savePetPhoto,
+} from "../utils/petPhotoStorage.js";
 
 const PET_UPDATE_FIELDS = [
   "name",
@@ -14,15 +22,38 @@ const PET_UPDATE_FIELDS = [
   "breed",
   "age",
   "careNotes",
-  "photoUrl",
 ];
 
-const getUserId = (req) => {
+const PET_RESPONSE_FIELDS = `
+  id,
+  owner_id AS "ownerId",
+  name,
+  species,
+  breed,
+  age,
+  care_notes AS "careNotes",
+  (
+    photo_filename IS NOT NULL
+  ) AS "hasPhoto"
+`;
+
+function getUserId(req) {
   return req.user.id || req.user.userId;
-};
+}
 
 function isForeignKeyConflict(error) {
   return error.code === "23503";
+}
+
+function hasLegacyPhotoUrl(body) {
+  return hasOwn(body, "photoUrl");
+}
+
+function sendLegacyPhotoUrlError(res) {
+  return res.status(400).json({
+    error:
+      "photoUrl is not supported; upload a file using /api/pets/:id/photo",
+  });
 }
 
 function parseRequiredPetString(
@@ -55,7 +86,10 @@ function parseNullablePetString(
   field,
   maxLength,
 ) {
-  if (value === undefined || value === null) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
     return {
       value: null,
       error: null,
@@ -65,7 +99,8 @@ function parseNullablePetString(
   if (typeof value !== "string") {
     return {
       value: null,
-      error: `${field} must be a string or null`,
+      error:
+        `${field} must be a string or null`,
     };
   }
 
@@ -74,7 +109,9 @@ function parseNullablePetString(
   if (normalizedValue.length > maxLength) {
     return {
       value: null,
-      error: `${field} cannot exceed ${maxLength} characters`,
+      error:
+        `${field} cannot exceed ` +
+        `${maxLength} characters`,
     };
   }
 
@@ -85,7 +122,10 @@ function parseNullablePetString(
 }
 
 function parseNullableAge(value) {
-  if (value === undefined || value === null) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
     return {
       value: null,
       error: null,
@@ -101,7 +141,8 @@ function parseNullableAge(value) {
   if (numericAge === null) {
     return {
       value: null,
-      error: "age must be a non-negative integer or null",
+      error:
+        "age must be a non-negative integer or null",
     };
   }
 
@@ -111,65 +152,63 @@ function parseNullableAge(value) {
   };
 }
 
-function parseNullablePhotoUrl(value) {
-  if (value === undefined || value === null) {
-    return {
-      value: null,
-      error: null,
-    };
-  }
-
-  if (typeof value !== "string") {
-    return {
-      value: null,
-      error: "photoUrl must be a string or null",
-    };
-  }
-
-  const normalizedValue = value.trim();
-
-  if (!normalizedValue) {
-    return {
-      value: null,
-      error: null,
-    };
-  }
-
-  if (!isValidHttpUrl(normalizedValue)) {
-    return {
-      value: null,
-      error:
-        "photoUrl must be a valid HTTP or HTTPS URL",
-    };
-  }
-
-  return {
-    value: normalizedValue,
-    error: null,
-  };
-}
-
 function hasPetUpdate(body) {
-  return PET_UPDATE_FIELDS.some((field) =>
-    hasOwn(body, field),
+  return PET_UPDATE_FIELDS.some(
+    (field) => hasOwn(body, field),
   );
 }
 
-export const getPets = async (req, res, next) => {
+async function deleteStoredPhotoSafely(
+  filename,
+  reason,
+) {
+  if (!filename) {
+    return;
+  }
+
+  try {
+    await deletePetPhoto(filename);
+  } catch (error) {
+    console.error(
+      "Pet photo cleanup failed",
+      {
+        reason,
+        message: error.message,
+      },
+    );
+  }
+}
+
+async function rollbackSafely(client) {
+  try {
+    await client.query("ROLLBACK");
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function sendStorageError(
+  error,
+  res,
+) {
+  return res.status(error.status).json({
+    error: error.message,
+  });
+}
+
+export async function getPets(
+  req,
+  res,
+  next,
+) {
   try {
     const ownerId = getUserId(req);
 
     const result = await query(
       `
       SELECT
-        id,
-        owner_id AS "ownerId",
-        name,
-        species,
-        breed,
-        age,
-        care_notes AS "careNotes",
-        photo_url AS "photoUrl"
+        ${PET_RESPONSE_FIELDS}
       FROM pets
       WHERE owner_id = $1
       ORDER BY id DESC;
@@ -177,43 +216,57 @@ export const getPets = async (req, res, next) => {
       [ownerId],
     );
 
-    res.json({
+    res.status(200).json({
       pets: result.rows,
     });
   } catch (error) {
     next(error);
   }
-};
+}
 
-export const createPet = async (req, res, next) => {
+export async function createPet(
+  req,
+  res,
+  next,
+) {
   try {
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
     }
 
+    if (hasLegacyPhotoUrl(req.body)) {
+      return sendLegacyPhotoUrlError(res);
+    }
+
     const ownerId = getUserId(req);
+
     const {
       name,
       species,
       breed,
       age,
       careNotes,
-      photoUrl,
     } = req.body;
 
-    if (name === undefined || species === undefined) {
+    if (
+      name === undefined ||
+      species === undefined
+    ) {
       return res.status(400).json({
-        error: "name and species are required",
+        error:
+          "name and species are required",
       });
     }
 
-    const parsedName = parseRequiredPetString(
-      name,
-      "name",
-      50,
-    );
+    const parsedName =
+      parseRequiredPetString(
+        name,
+        "name",
+        50,
+      );
 
     if (parsedName.error) {
       return res.status(400).json({
@@ -221,11 +274,12 @@ export const createPet = async (req, res, next) => {
       });
     }
 
-    const parsedSpecies = parseRequiredPetString(
-      species,
-      "species",
-      30,
-    );
+    const parsedSpecies =
+      parseRequiredPetString(
+        species,
+        "species",
+        30,
+      );
 
     if (parsedSpecies.error) {
       return res.status(400).json({
@@ -233,11 +287,12 @@ export const createPet = async (req, res, next) => {
       });
     }
 
-    const parsedBreed = parseNullablePetString(
-      breed,
-      "breed",
-      50,
-    );
+    const parsedBreed =
+      parseNullablePetString(
+        breed,
+        "breed",
+        50,
+      );
 
     if (parsedBreed.error) {
       return res.status(400).json({
@@ -245,7 +300,8 @@ export const createPet = async (req, res, next) => {
       });
     }
 
-    const parsedAge = parseNullableAge(age);
+    const parsedAge =
+      parseNullableAge(age);
 
     if (parsedAge.error) {
       return res.status(400).json({
@@ -253,23 +309,16 @@ export const createPet = async (req, res, next) => {
       });
     }
 
-    const parsedCareNotes = parseNullablePetString(
-      careNotes,
-      "careNotes",
-      5000,
-    );
+    const parsedCareNotes =
+      parseNullablePetString(
+        careNotes,
+        "careNotes",
+        5000,
+      );
 
     if (parsedCareNotes.error) {
       return res.status(400).json({
         error: parsedCareNotes.error,
-      });
-    }
-
-    const parsedPhotoUrl = parseNullablePhotoUrl(photoUrl);
-
-    if (parsedPhotoUrl.error) {
-      return res.status(400).json({
-        error: parsedPhotoUrl.error,
       });
     }
 
@@ -281,19 +330,11 @@ export const createPet = async (req, res, next) => {
         species,
         breed,
         age,
-        care_notes,
-        photo_url
+        care_notes
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, $6)
       RETURNING
-        id,
-        owner_id AS "ownerId",
-        name,
-        species,
-        breed,
-        age,
-        care_notes AS "careNotes",
-        photo_url AS "photoUrl";
+        ${PET_RESPONSE_FIELDS};
       `,
       [
         ownerId,
@@ -302,7 +343,6 @@ export const createPet = async (req, res, next) => {
         parsedBreed.value,
         parsedAge.value,
         parsedCareNotes.value,
-        parsedPhotoUrl.value,
       ],
     );
 
@@ -312,32 +352,33 @@ export const createPet = async (req, res, next) => {
   } catch (error) {
     next(error);
   }
-};
+}
 
-export const getPetById = async (req, res, next) => {
+export async function getPetById(
+  req,
+  res,
+  next,
+) {
   try {
     const ownerId = getUserId(req);
-    const petId = parsePositiveInteger(req.params.id);
+
+    const petId =
+      parsePositiveInteger(req.params.id);
 
     if (!petId) {
       return res.status(400).json({
-        error: "id must be a positive integer",
+        error:
+          "id must be a positive integer",
       });
     }
 
     const result = await query(
       `
       SELECT
-        id,
-        owner_id AS "ownerId",
-        name,
-        species,
-        breed,
-        age,
-        care_notes AS "careNotes",
-        photo_url AS "photoUrl"
+        ${PET_RESPONSE_FIELDS}
       FROM pets
-      WHERE id = $1 AND owner_id = $2;
+      WHERE id = $1
+        AND owner_id = $2;
       `,
       [petId, ownerId],
     );
@@ -348,43 +389,64 @@ export const getPetById = async (req, res, next) => {
       });
     }
 
-    res.json({
+    res.status(200).json({
       pet: result.rows[0],
     });
   } catch (error) {
     next(error);
   }
-};
+}
 
-export const updatePet = async (req, res, next) => {
+export async function updatePet(
+  req,
+  res,
+  next,
+) {
   try {
     const ownerId = getUserId(req);
-    const petId = parsePositiveInteger(req.params.id);
+
+    const petId =
+      parsePositiveInteger(req.params.id);
 
     if (!petId) {
       return res.status(400).json({
-        error: "id must be a positive integer",
+        error:
+          "id must be a positive integer",
       });
     }
 
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
+    }
+
+    if (hasLegacyPhotoUrl(req.body)) {
+      return sendLegacyPhotoUrlError(res);
     }
 
     if (!hasPetUpdate(req.body)) {
       return res.status(400).json({
-        error: "At least one pet field is required",
+        error:
+          "At least one pet field is required",
       });
     }
 
-    const hasName = hasOwn(req.body, "name");
-    const hasSpecies = hasOwn(req.body, "species");
-    const hasBreed = hasOwn(req.body, "breed");
-    const hasAge = hasOwn(req.body, "age");
-    const hasCareNotes = hasOwn(req.body, "careNotes");
-    const hasPhotoUrl = hasOwn(req.body, "photoUrl");
+    const hasName =
+      hasOwn(req.body, "name");
+
+    const hasSpecies =
+      hasOwn(req.body, "species");
+
+    const hasBreed =
+      hasOwn(req.body, "breed");
+
+    const hasAge =
+      hasOwn(req.body, "age");
+
+    const hasCareNotes =
+      hasOwn(req.body, "careNotes");
 
     let parsedName = {
       value: null,
@@ -411,11 +473,12 @@ export const updatePet = async (req, res, next) => {
     };
 
     if (hasSpecies) {
-      parsedSpecies = parseRequiredPetString(
-        req.body.species,
-        "species",
-        30,
-      );
+      parsedSpecies =
+        parseRequiredPetString(
+          req.body.species,
+          "species",
+          30,
+        );
 
       if (parsedSpecies.error) {
         return res.status(400).json({
@@ -430,11 +493,12 @@ export const updatePet = async (req, res, next) => {
     };
 
     if (hasBreed) {
-      parsedBreed = parseNullablePetString(
-        req.body.breed,
-        "breed",
-        50,
-      );
+      parsedBreed =
+        parseNullablePetString(
+          req.body.breed,
+          "breed",
+          50,
+        );
 
       if (parsedBreed.error) {
         return res.status(400).json({
@@ -449,7 +513,8 @@ export const updatePet = async (req, res, next) => {
     };
 
     if (hasAge) {
-      parsedAge = parseNullableAge(req.body.age);
+      parsedAge =
+        parseNullableAge(req.body.age);
 
       if (parsedAge.error) {
         return res.status(400).json({
@@ -464,32 +529,16 @@ export const updatePet = async (req, res, next) => {
     };
 
     if (hasCareNotes) {
-      parsedCareNotes = parseNullablePetString(
-        req.body.careNotes,
-        "careNotes",
-        5000,
-      );
+      parsedCareNotes =
+        parseNullablePetString(
+          req.body.careNotes,
+          "careNotes",
+          5000,
+        );
 
       if (parsedCareNotes.error) {
         return res.status(400).json({
           error: parsedCareNotes.error,
-        });
-      }
-    }
-
-    let parsedPhotoUrl = {
-      value: null,
-      error: null,
-    };
-
-    if (hasPhotoUrl) {
-      parsedPhotoUrl = parseNullablePhotoUrl(
-        req.body.photoUrl,
-      );
-
-      if (parsedPhotoUrl.error) {
-        return res.status(400).json({
-          error: parsedPhotoUrl.error,
         });
       }
     }
@@ -499,39 +548,34 @@ export const updatePet = async (req, res, next) => {
       UPDATE pets
       SET
         name = CASE
-          WHEN $1::boolean THEN $2::varchar
+          WHEN $1::boolean
+            THEN $2::varchar
           ELSE name
         END,
         species = CASE
-          WHEN $3::boolean THEN $4::varchar
+          WHEN $3::boolean
+            THEN $4::varchar
           ELSE species
         END,
         breed = CASE
-          WHEN $5::boolean THEN $6::varchar
+          WHEN $5::boolean
+            THEN $6::varchar
           ELSE breed
         END,
         age = CASE
-          WHEN $7::boolean THEN $8::integer
+          WHEN $7::boolean
+            THEN $8::integer
           ELSE age
         END,
         care_notes = CASE
-          WHEN $9::boolean THEN $10::text
+          WHEN $9::boolean
+            THEN $10::text
           ELSE care_notes
-        END,
-        photo_url = CASE
-          WHEN $11::boolean THEN $12::text
-          ELSE photo_url
         END
-      WHERE id = $13 AND owner_id = $14
+      WHERE id = $11
+        AND owner_id = $12
       RETURNING
-        id,
-        owner_id AS "ownerId",
-        name,
-        species,
-        breed,
-        age,
-        care_notes AS "careNotes",
-        photo_url AS "photoUrl";
+        ${PET_RESPONSE_FIELDS};
       `,
       [
         hasName,
@@ -544,8 +588,6 @@ export const updatePet = async (req, res, next) => {
         parsedAge.value,
         hasCareNotes,
         parsedCareNotes.value,
-        hasPhotoUrl,
-        parsedPhotoUrl.value,
         petId,
         ownerId,
       ],
@@ -557,30 +599,164 @@ export const updatePet = async (req, res, next) => {
       });
     }
 
-    res.json({
+    res.status(200).json({
       pet: result.rows[0],
     });
   } catch (error) {
     next(error);
   }
-};
+}
 
-export const deletePet = async (req, res, next) => {
+export async function uploadPetPhotoFile(
+  req,
+  res,
+  next,
+) {
+  const petId =
+    parsePositiveInteger(req.params.id);
+
+  if (!petId) {
+    return res.status(400).json({
+      error:
+        "id must be a positive integer",
+    });
+  }
+
+  if (!req.file) {
+    return res.status(400).json({
+      error:
+        "A pet photo file is required",
+    });
+  }
+
+  const ownerId = getUserId(req);
+  const client = await pool.connect();
+
+  let transactionStarted = false;
+  let storedPhoto = null;
+
+  try {
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const existingResult =
+      await client.query(
+        `
+        SELECT
+          id,
+          photo_filename
+            AS "photoFilename"
+        FROM pets
+        WHERE id = $1
+          AND owner_id = $2
+        FOR UPDATE;
+        `,
+        [petId, ownerId],
+      );
+
+    if (existingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(404).json({
+        error: "Pet not found",
+      });
+    }
+
+    storedPhoto = await savePetPhoto(
+      req.file.buffer,
+    );
+
+    const result = await client.query(
+      `
+      UPDATE pets
+      SET
+        photo_filename = $1,
+        photo_content_type = $2
+      WHERE id = $3
+        AND owner_id = $4
+      RETURNING
+        ${PET_RESPONSE_FIELDS};
+      `,
+      [
+        storedPhoto.filename,
+        storedPhoto.contentType,
+        petId,
+        ownerId,
+      ],
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    await deleteStoredPhotoSafely(
+      existingResult.rows[0].photoFilename,
+      "photo replacement",
+    );
+
+    res.status(200).json({
+      pet: result.rows[0],
+    });
+  } catch (error) {
+    const rollbackError =
+      transactionStarted
+        ? await rollbackSafely(client)
+        : null;
+
+    if (storedPhoto) {
+      await deleteStoredPhotoSafely(
+        storedPhoto.filename,
+        "failed photo upload",
+      );
+    }
+
+    if (rollbackError) {
+      next(rollbackError);
+      return;
+    }
+
+    if (
+      error instanceof
+      PetPhotoStorageError
+    ) {
+      sendStorageError(error, res);
+      return;
+    }
+
+    next(error);
+  } finally {
+    client.release();
+  }
+}
+
+export async function getPetPhotoFile(
+  req,
+  res,
+  next,
+) {
   try {
     const ownerId = getUserId(req);
-    const petId = parsePositiveInteger(req.params.id);
+
+    const petId =
+      parsePositiveInteger(req.params.id);
 
     if (!petId) {
       return res.status(400).json({
-        error: "id must be a positive integer",
+        error:
+          "id must be a positive integer",
       });
     }
 
     const result = await query(
       `
-      DELETE FROM pets
-      WHERE id = $1 AND owner_id = $2
-      RETURNING id;
+      SELECT
+        photo_filename
+          AS "photoFilename",
+        photo_content_type
+          AS "photoContentType"
+      FROM pets
+      WHERE id = $1
+        AND owner_id = $2;
       `,
       [petId, ownerId],
     );
@@ -591,8 +767,189 @@ export const deletePet = async (req, res, next) => {
       });
     }
 
-    res.json({
-      message: "Pet deleted successfully",
+    const pet = result.rows[0];
+
+    if (!pet.photoFilename) {
+      return res.status(404).json({
+        error: "Pet photo not found",
+      });
+    }
+
+    const photoBuffer =
+      await readPetPhoto(
+        pet.photoFilename,
+      );
+
+    if (!photoBuffer) {
+      return res.status(404).json({
+        error: "Pet photo not found",
+      });
+    }
+
+    res.set({
+      "Cache-Control":
+        "private, no-store",
+      "Content-Length":
+        String(photoBuffer.length),
+      "Content-Type":
+        pet.photoContentType,
+      "X-Content-Type-Options":
+        "nosniff",
+    });
+
+    res.status(200).send(photoBuffer);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deletePetPhotoFile(
+  req,
+  res,
+  next,
+) {
+  const petId =
+    parsePositiveInteger(req.params.id);
+
+  if (!petId) {
+    return res.status(400).json({
+      error:
+        "id must be a positive integer",
+    });
+  }
+
+  const ownerId = getUserId(req);
+  const client = await pool.connect();
+
+  let transactionStarted = false;
+
+  try {
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const existingResult =
+      await client.query(
+        `
+        SELECT
+          id,
+          photo_filename
+            AS "photoFilename"
+        FROM pets
+        WHERE id = $1
+          AND owner_id = $2
+        FOR UPDATE;
+        `,
+        [petId, ownerId],
+      );
+
+    if (existingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(404).json({
+        error: "Pet not found",
+      });
+    }
+
+    const existing =
+      existingResult.rows[0];
+
+    if (!existing.photoFilename) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(404).json({
+        error: "Pet photo not found",
+      });
+    }
+
+    const result = await client.query(
+      `
+      UPDATE pets
+      SET
+        photo_filename = NULL,
+        photo_content_type = NULL
+      WHERE id = $1
+        AND owner_id = $2
+      RETURNING
+        ${PET_RESPONSE_FIELDS};
+      `,
+      [petId, ownerId],
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    await deleteStoredPhotoSafely(
+      existing.photoFilename,
+      "photo deletion",
+    );
+
+    res.status(200).json({
+      pet: result.rows[0],
+    });
+  } catch (error) {
+    const rollbackError =
+      transactionStarted
+        ? await rollbackSafely(client)
+        : null;
+
+    if (rollbackError) {
+      next(rollbackError);
+      return;
+    }
+
+    next(error);
+  } finally {
+    client.release();
+  }
+}
+
+export async function deletePet(
+  req,
+  res,
+  next,
+) {
+  try {
+    const ownerId = getUserId(req);
+
+    const petId =
+      parsePositiveInteger(req.params.id);
+
+    if (!petId) {
+      return res.status(400).json({
+        error:
+          "id must be a positive integer",
+      });
+    }
+
+    const result = await query(
+      `
+      DELETE FROM pets
+      WHERE id = $1
+        AND owner_id = $2
+      RETURNING
+        id,
+        photo_filename
+          AS "photoFilename";
+      `,
+      [petId, ownerId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "Pet not found",
+      });
+    }
+
+    await deleteStoredPhotoSafely(
+      result.rows[0].photoFilename,
+      "pet deletion",
+    );
+
+    res.status(200).json({
+      message:
+        "Pet deleted successfully",
     });
   } catch (error) {
     if (isForeignKeyConflict(error)) {
@@ -604,4 +961,4 @@ export const deletePet = async (req, res, next) => {
 
     next(error);
   }
-};
+}

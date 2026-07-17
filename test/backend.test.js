@@ -960,8 +960,6 @@ describe("backend API", () => {
           breed: "Labrador",
           age: 5,
           careNotes: "Daily medication",
-          photoUrl:
-            "https://example.com/rocky.jpg",
         }),
       },
     );
@@ -977,7 +975,6 @@ describe("backend API", () => {
           breed: null,
           age: null,
           careNotes: null,
-          photoUrl: null,
         }),
       },
     );
@@ -987,10 +984,6 @@ describe("backend API", () => {
     assert.equal(clearResponse.body.pet.age, null);
     assert.equal(
       clearResponse.body.pet.careNotes,
-      null,
-    );
-    assert.equal(
-      clearResponse.body.pet.photoUrl,
       null,
     );
   });

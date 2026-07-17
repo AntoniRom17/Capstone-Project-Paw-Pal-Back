@@ -21,6 +21,8 @@ CREATE TABLE users (
   city VARCHAR(100) NOT NULL,
   state VARCHAR(2) NOT NULL,
   zip_code VARCHAR(10) NOT NULL,
+  profile_photo_filename VARCHAR(255),
+  profile_photo_content_type VARCHAR(50),
   trust_score INTEGER
     CHECK (trust_score BETWEEN 0 AND 100),
   background_check_status VARCHAR(20) NOT NULL
@@ -38,6 +40,18 @@ CREATE TABLE users (
   is_active BOOLEAN NOT NULL DEFAULT true,
   deactivated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT users_profile_photo_metadata_complete
+    CHECK (
+      (
+        profile_photo_filename IS NULL
+        AND profile_photo_content_type IS NULL
+      )
+      OR
+      (
+        profile_photo_filename IS NOT NULL
+        AND profile_photo_content_type IS NOT NULL
+      )
+    ),
   CHECK (
     (
       is_active = true
@@ -60,8 +74,21 @@ CREATE TABLE pets (
   breed VARCHAR(50),
   age INTEGER CHECK (age >= 0),
   care_notes TEXT,
-  photo_url TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  photo_filename VARCHAR(255),
+  photo_content_type VARCHAR(50),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT pets_photo_metadata_complete
+    CHECK (
+      (
+        photo_filename IS NULL
+        AND photo_content_type IS NULL
+      )
+      OR
+      (
+        photo_filename IS NOT NULL
+        AND photo_content_type IS NOT NULL
+      )
+    )
 );
 
 CREATE TABLE services (

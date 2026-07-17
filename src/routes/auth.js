@@ -275,6 +275,9 @@ router.post(
           city,
           state,
           zip_code AS "zipCode",
+          (
+            profile_photo_filename IS NOT NULL
+          ) AS "hasProfilePhoto",
           is_active AS "isActive";
         `,
         [
@@ -366,6 +369,9 @@ router.post(
           city,
           state,
           zip_code AS "zipCode",
+          (
+            profile_photo_filename IS NOT NULL
+          ) AS "hasProfilePhoto",
           is_active AS "isActive",
           password_hash
         FROM users

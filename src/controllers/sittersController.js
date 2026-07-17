@@ -43,7 +43,11 @@ function parsePriceOverride(value) {
   };
 }
 
-export const getSitters = async (req, res, next) => {
+export const getSitters = async (
+  req,
+  res,
+  next,
+) => {
   try {
     const {
       service,
@@ -84,9 +88,11 @@ export const getSitters = async (req, res, next) => {
           SELECT 1
           FROM sitter_services filter_ss
           JOIN services filter_service
-            ON filter_service.id = filter_ss.service_id
+            ON filter_service.id =
+              filter_ss.service_id
           WHERE filter_ss.sitter_id = u.id
-            AND filter_service.name ILIKE ${parameter}
+            AND filter_service.name
+              ILIKE ${parameter}
         )
       `);
     }
@@ -109,7 +115,9 @@ export const getSitters = async (req, res, next) => {
         `%${city.trim()}%`,
       );
 
-      conditions.push(`u.city ILIKE ${parameter}`);
+      conditions.push(
+        `u.city ILIKE ${parameter}`,
+      );
     }
 
     if (state !== undefined) {
@@ -125,7 +133,9 @@ export const getSitters = async (req, res, next) => {
         state.trim().toUpperCase(),
       );
 
-      conditions.push(`u.state = ${parameter}`);
+      conditions.push(
+        `u.state = ${parameter}`,
+      );
     }
 
     if (zipCode !== undefined) {
@@ -141,14 +151,19 @@ export const getSitters = async (req, res, next) => {
         String(zipCode).trim(),
       );
 
-      conditions.push(`u.zip_code = ${parameter}`);
+      conditions.push(
+        `u.zip_code = ${parameter}`,
+      );
     }
 
     if (maxPrice !== undefined) {
-      const numericMaxPrice = parseNumber(maxPrice, {
-        min: 0,
-        max: MAX_SERVICE_PRICE,
-      });
+      const numericMaxPrice = parseNumber(
+        maxPrice,
+        {
+          min: 0,
+          max: MAX_SERVICE_PRICE,
+        },
+      );
 
       if (numericMaxPrice === null) {
         return res.status(400).json({
@@ -167,7 +182,8 @@ export const getSitters = async (req, res, next) => {
           SELECT 1
           FROM sitter_services price_ss
           JOIN services price_service
-            ON price_service.id = price_ss.service_id
+            ON price_service.id =
+              price_ss.service_id
           WHERE price_ss.sitter_id = u.id
             AND COALESCE(
               price_ss.price_override,
@@ -178,14 +194,18 @@ export const getSitters = async (req, res, next) => {
     }
 
     if (minRating !== undefined) {
-      const numericMinRating = parseNumber(minRating, {
-        min: 0,
-        max: 5,
-      });
+      const numericMinRating = parseNumber(
+        minRating,
+        {
+          min: 0,
+          max: 5,
+        },
+      );
 
       if (numericMinRating === null) {
         return res.status(400).json({
-          error: "minRating must be between 0 and 5",
+          error:
+            "minRating must be between 0 and 5",
         });
       }
 
@@ -197,12 +217,15 @@ export const getSitters = async (req, res, next) => {
       conditions.push(`
         COALESCE(
           (
-            SELECT AVG(review_filter.rating)
+            SELECT AVG(
+              review_filter.rating
+            )
             FROM bookings booking_filter
             JOIN reviews review_filter
               ON review_filter.booking_id =
                 booking_filter.id
-            WHERE booking_filter.sitter_id = u.id
+            WHERE booking_filter.sitter_id =
+              u.id
           ),
           0
         ) >= ${parameter}
@@ -218,7 +241,13 @@ export const getSitters = async (req, res, next) => {
         u.city,
         u.state,
         u.zip_code AS "zipCode",
-        COALESCE(u.trust_score, 0) AS "trustScore",
+        (
+          u.profile_photo_filename IS NOT NULL
+        ) AS "hasProfilePhoto",
+        COALESCE(
+          u.trust_score,
+          0
+        ) AS "trustScore",
         u.background_check_status
           AS "backgroundCheckStatus",
         COALESCE(
@@ -233,7 +262,8 @@ export const getSitters = async (req, res, next) => {
             )::float
             FROM bookings
             JOIN reviews
-              ON reviews.booking_id = bookings.id
+              ON reviews.booking_id =
+                bookings.id
             WHERE bookings.sitter_id = u.id
           ),
           0
@@ -242,7 +272,8 @@ export const getSitters = async (req, res, next) => {
           SELECT COUNT(*)::int
           FROM bookings
           JOIN reviews
-            ON reviews.booking_id = bookings.id
+            ON reviews.booking_id =
+              bookings.id
           WHERE bookings.sitter_id = u.id
         ) AS "reviewCount",
         COALESCE(
@@ -269,13 +300,16 @@ export const getSitters = async (req, res, next) => {
             JOIN services
               ON services.id =
                 sitter_services.service_id
-            WHERE sitter_services.sitter_id = u.id
+            WHERE sitter_services.sitter_id =
+              u.id
           ),
           '[]'::jsonb
         ) AS services
       FROM users u
       WHERE ${conditions.join(" AND ")}
-      ORDER BY "averageRating" DESC, u.name ASC;
+      ORDER BY
+        "averageRating" DESC,
+        u.name ASC;
       `,
       params,
     );
@@ -294,11 +328,13 @@ export const getSitterById = async (
   next,
 ) => {
   try {
-    const sitterId = parsePositiveInteger(req.params.id);
+    const sitterId =
+      parsePositiveInteger(req.params.id);
 
     if (!sitterId) {
       return res.status(400).json({
-        error: "id must be a positive integer",
+        error:
+          "id must be a positive integer",
       });
     }
 
@@ -312,7 +348,13 @@ export const getSitterById = async (
         u.city,
         u.state,
         u.zip_code AS "zipCode",
-        COALESCE(u.trust_score, 0) AS "trustScore",
+        (
+          u.profile_photo_filename IS NOT NULL
+        ) AS "hasProfilePhoto",
+        COALESCE(
+          u.trust_score,
+          0
+        ) AS "trustScore",
         u.background_check_status
           AS "backgroundCheckStatus",
         COALESCE(
@@ -327,7 +369,8 @@ export const getSitterById = async (
             )::float
             FROM bookings
             JOIN reviews
-              ON reviews.booking_id = bookings.id
+              ON reviews.booking_id =
+                bookings.id
             WHERE bookings.sitter_id = u.id
           ),
           0
@@ -336,7 +379,8 @@ export const getSitterById = async (
           SELECT COUNT(*)::int
           FROM bookings
           JOIN reviews
-            ON reviews.booking_id = bookings.id
+            ON reviews.booking_id =
+              bookings.id
           WHERE bookings.sitter_id = u.id
         ) AS "reviewCount"
       FROM users u
@@ -356,7 +400,8 @@ export const getSitterById = async (
     const servicesResult = await query(
       `
       SELECT
-        sitter_services.id AS "sitterServiceId",
+        sitter_services.id
+          AS "sitterServiceId",
         services.id AS "serviceId",
         services.name,
         services.description,
@@ -366,7 +411,8 @@ export const getSitterById = async (
         )::float AS price
       FROM sitter_services
       JOIN services
-        ON services.id = sitter_services.service_id
+        ON services.id =
+          sitter_services.service_id
       WHERE sitter_services.sitter_id = $1
       ORDER BY services.name;
       `,
@@ -392,7 +438,9 @@ export const getSitterById = async (
           )
         )
         AND is_booked = false
-      ORDER BY date ASC, start_time ASC;
+      ORDER BY
+        date ASC,
+        start_time ASC;
       `,
       [sitterId],
     );
@@ -404,14 +452,20 @@ export const getSitterById = async (
         reviews.booking_id AS "bookingId",
         reviews.reviewer_id AS "reviewerId",
         users.name AS "reviewerName",
+        (
+          users.profile_photo_filename
+            IS NOT NULL
+        ) AS "reviewerHasProfilePhoto",
         reviews.rating,
         reviews.comment,
         reviews.created_at AS "createdAt"
       FROM reviews
       JOIN bookings
-        ON bookings.id = reviews.booking_id
+        ON bookings.id =
+          reviews.booking_id
       JOIN users
-        ON users.id = reviews.reviewer_id
+        ON users.id =
+          reviews.reviewer_id
       WHERE bookings.sitter_id = $1
       ORDER BY reviews.created_at DESC;
       `,
@@ -422,7 +476,8 @@ export const getSitterById = async (
       sitter: {
         ...sitterResult.rows[0],
         services: servicesResult.rows,
-        availability: availabilityResult.rows,
+        availability:
+          availabilityResult.rows,
         reviews: reviewsResult.rows,
       },
     });
@@ -439,7 +494,8 @@ export const addSitterService = async (
   try {
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
     }
 
@@ -507,7 +563,8 @@ export const addSitterService = async (
         )::float AS price
       FROM inserted
       JOIN services
-        ON services.id = inserted.service_id;
+        ON services.id =
+          inserted.service_id;
       `,
       [
         sitterId,
@@ -552,19 +609,27 @@ export const updateSitterService = async (
 
     if (!sitterServiceId) {
       return res.status(400).json({
-        error: "id must be a positive integer",
+        error:
+          "id must be a positive integer",
       });
     }
 
     if (!isPlainObject(req.body)) {
       return res.status(400).json({
-        error: "Request body must be a JSON object",
+        error:
+          "Request body must be a JSON object",
       });
     }
 
-    if (!hasOwn(req.body, "priceOverride")) {
+    if (
+      !hasOwn(
+        req.body,
+        "priceOverride",
+      )
+    ) {
       return res.status(400).json({
-        error: "priceOverride is required",
+        error:
+          "priceOverride is required",
       });
     }
 
@@ -603,7 +668,8 @@ export const updateSitterService = async (
         )::float AS price
       FROM updated
       JOIN services
-        ON services.id = updated.service_id;
+        ON services.id =
+          updated.service_id;
       `,
       [
         parsedPrice.value,
@@ -614,7 +680,8 @@ export const updateSitterService = async (
 
     if (result.rows.length === 0) {
       return res.status(404).json({
-        error: "Sitter service not found",
+        error:
+          "Sitter service not found",
       });
     }
 
@@ -640,7 +707,8 @@ export const deleteSitterService = async (
 
     if (!sitterServiceId) {
       return res.status(400).json({
-        error: "id must be a positive integer",
+        error:
+          "id must be a positive integer",
       });
     }
 
@@ -651,12 +719,16 @@ export const deleteSitterService = async (
         AND sitter_id = $2
       RETURNING id;
       `,
-      [sitterServiceId, sitterId],
+      [
+        sitterServiceId,
+        sitterId,
+      ],
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({
-        error: "Sitter service not found",
+        error:
+          "Sitter service not found",
       });
     }
 
