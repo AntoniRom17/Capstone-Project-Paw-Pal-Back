@@ -22,6 +22,7 @@ This backend handles authentication, users, sitters, pets, pet and profile photo
 ```text
 Capstone-Project-Paw-Pal-Back/
 ├── src/
+│   ├── config/
 │   ├── controllers/
 │   ├── db/
 │   │   └── migrations/
@@ -57,6 +58,7 @@ JWT_SECRET=replace_with_a_long_random_secret
 JWT_EXPIRES_IN=21d
 BACKGROUND_CHECK_WEBHOOK_SECRET=replace_with_a_separate_random_secret
 CLIENT_URL=http://localhost:5173
+APP_TIME_ZONE=America/Chicago
 PET_PHOTO_UPLOAD_DIR=uploads/pets
 PET_PHOTO_MAX_BYTES=5242880
 PROFILE_PHOTO_UPLOAD_DIR=uploads/profiles
@@ -66,6 +68,8 @@ PROFILE_PHOTO_MAX_BYTES=5242880
 `DATABASE_URL` and `TEST_DATABASE_URL` must point to separate PostgreSQL databases.
 
 The test database name must include `test`. The test suite refuses to run when both database URLs point to the same database.
+
+`APP_TIME_ZONE` must be a valid IANA timezone such as `America/Chicago` or `UTC`.
 
 ## Scripts
 
@@ -99,19 +103,74 @@ Apply non-destructive database migrations:
 npm run db:migrate
 ```
 
-Reset the local database schema:
-
-```bash
-npm run db:reset
-```
-
 Seed the database:
 
 ```bash
 npm run db:seed
 ```
 
-Warning: `npm run db:reset` drops and recreates the PawPal database tables. Use migrations when updating an existing database.
+### Reset the Development Database
+
+`npm run db:reset` is destructive. It drops and recreates the PawPal database tables using `src/db/schema.sql`.
+
+The reset command refuses to run unless:
+
+- `NODE_ENV` is exactly `development`.
+- `DATABASE_URL` contains a database name.
+- The database is not `postgres`, `template0`, or `template1`.
+- `CONFIRM_DATABASE_RESET` exactly matches the database name from `DATABASE_URL`.
+
+For a development database named `pawpal`, run the following in PowerShell:
+
+```powershell
+$env:CONFIRM_DATABASE_RESET = "pawpal"
+npm run db:reset
+Remove-Item Env:\CONFIRM_DATABASE_RESET
+```
+
+On macOS or Linux:
+
+```bash
+CONFIRM_DATABASE_RESET=pawpal npm run db:reset
+```
+
+Do not store `CONFIRM_DATABASE_RESET` permanently in `.env`. It is intentionally a one-time confirmation for each destructive reset.
+
+Use migrations instead of `db:reset` when updating an existing or deployed database:
+
+```bash
+npm run db:migrate
+```
+
+## Timezone Behavior
+
+PawPal stores availability and booking schedules as PostgreSQL `DATE` and `TIME` values.
+
+All scheduling comparisons use the timezone configured by:
+
+```env
+APP_TIME_ZONE=America/Chicago
+```
+
+This includes:
+
+- Rejecting past availability
+- Filtering expired availability
+- Preventing expired bookings
+- Determining when bookings may be completed
+- Generating dates used by database seed data
+
+Every PostgreSQL connection is configured with `APP_TIME_ZONE`, so behavior does not depend on the operating system or database server's default timezone.
+
+When `APP_TIME_ZONE` is omitted, the backend defaults to:
+
+```text
+UTC
+```
+
+PostgreSQL `DATE` values are returned as `YYYY-MM-DD` strings. They are not converted into JavaScript `Date` objects, preventing calendar dates from shifting when the server runs in another timezone.
+
+The frontend should treat booking and availability dates and times as calendar values in `APP_TIME_ZONE`. They should not be interpreted as UTC timestamps.
 
 ## API Base URL
 
@@ -144,6 +203,25 @@ API errors follow this format:
 }
 ```
 
+Malformed request bodies and invalid route IDs return `400 Bad Request`. Validation failures do not expose database or server details.
+
+## Privacy
+
+Public sitter endpoints expose information needed for sitter discovery, including names, bios, locations, services, availability, ratings, Trust Scores, and profile-photo state.
+
+Public sitter responses do not expose phone numbers. A user's phone number remains available through their own authenticated account response:
+
+```http
+GET /api/users/me
+```
+
+The frontend must not expect `phone` in responses from:
+
+```http
+GET /api/sitters
+GET /api/sitters/:id
+```
+
 ## Routes
 
 ### Health
@@ -169,6 +247,8 @@ PATCH /api/users/me
 PATCH /api/users/me/password
 DELETE /api/users/me
 ```
+
+`GET /api/users/me` returns the authenticated user's private account information, including their own email and phone number.
 
 ### Profile Photos
 
@@ -264,6 +344,8 @@ Sitter list and detail responses include `hasProfilePhoto`.
 
 Sitter reviews include `reviewerHasProfilePhoto` for the reviewing owner.
 
+Public sitter list and detail responses do not include phone numbers.
+
 Sitter search supports:
 
 ```text
@@ -354,6 +436,7 @@ Availability rules:
 - Overlapping availability is rejected.
 - Booked availability cannot be edited or deleted.
 - Public availability only returns future, unbooked slots.
+- Date and time values use `APP_TIME_ZONE`.
 
 ### Bookings
 
@@ -380,8 +463,12 @@ Booking rules:
 - Expired availability cannot be booked.
 - Sitters can accept, decline, or complete bookings.
 - Owners can cancel eligible bookings.
-- Availability is marked booked when a booking is created.
-- Declined bookings release availability.
+- Accepted bookings cannot be completed before their scheduled end time.
+- Pending, accepted, and completed bookings reserve their availability slot.
+- Only one pending, accepted, or completed booking may reference an availability slot.
+- Declined and cancelled bookings release availability for a replacement booking.
+- The active-booking rule is enforced by PostgreSQL as well as the API.
+- Date and time values use `APP_TIME_ZONE`.
 
 ### Reviews
 
@@ -410,10 +497,24 @@ Messaging rules:
 
 - Users must be authenticated.
 - Only booking participants can access messages.
+- `POST /api/messages` requires a JSON object.
+- `bookingId` must be a positive safe integer.
+- Malformed and coercive booking IDs are rejected.
+- Missing message fields return `400 Bad Request`.
+- Message bodies must be strings.
 - Message bodies cannot be empty.
 - Message bodies cannot exceed 2000 characters.
 - Messages are returned chronologically.
 - Reading messages marks them as read.
+
+Example message request:
+
+```json
+{
+  "bookingId": 1,
+  "body": "Is tomorrow still a good time?"
+}
+```
 
 ## Database
 
@@ -435,6 +536,8 @@ Apply pending migrations with:
 npm run db:migrate
 ```
 
+Migration `007_include_pending_active_bookings.sql` upgrades existing databases so pending bookings participate in the active-booking uniqueness rule.
+
 Main tables include:
 
 ```text
@@ -449,6 +552,14 @@ messages
 schema_migrations
 ```
 
+The partial unique index:
+
+```text
+idx_one_active_booking_per_availability
+```
+
+allows only one `pending`, `accepted`, or `completed` booking per availability slot.
+
 Uploaded image files are stored on the filesystem.
 
 PostgreSQL stores only generated filenames and verified content types. API responses expose only `hasPhoto` or `hasProfilePhoto` booleans.
@@ -459,9 +570,15 @@ Backend tests are located in:
 
 ```text
 test/backend.test.js
+test/bookingCompletion.test.js
+test/bookingUniqueness.test.js
+test/messageValidation.test.js
 test/migrations.test.js
 test/petPhotos.test.js
 test/profilePhotos.test.js
+test/resetSafety.test.js
+test/sitterPrivacy.test.js
+test/timeZone.test.js
 test/trustScore.test.js
 ```
 
@@ -485,14 +602,24 @@ The test suite covers:
 - Profile photo state in authentication and sitter responses
 - Availability validation and overlap protection
 - Booking creation and status transitions
+- Booking completion timing
+- Active booking uniqueness for pending, accepted, and completed bookings
+- Availability release after declined and cancelled bookings
+- Application and PostgreSQL timezone configuration
+- PostgreSQL calendar-date serialization
 - Sitter service management
+- Public sitter phone-number privacy
+- Authenticated access to private profile information
 - Review validation
 - Trust Score behavior
 - Background-check workflows
 - Message authentication and permissions
+- Missing and malformed message request bodies
+- Strict message booking-ID validation
 - Database migration safety and rollback behavior
+- Destructive database reset protection
 
-The current suite contains 71 tests.
+The current suite contains 97 tests.
 
 ## Uploaded Photo Storage
 
@@ -517,6 +644,11 @@ Generated upload filenames must never be accepted directly from API clients.
 - Passwords are hashed with `bcrypt`.
 - Authentication uses JWT tokens.
 - SQL queries use the `pg` PostgreSQL client.
+- Database sessions use `APP_TIME_ZONE`.
+- PostgreSQL calendar dates remain `YYYY-MM-DD` strings.
+- Pending bookings reserve availability at the database level.
+- Public sitter endpoints do not expose phone numbers.
+- Authenticated users can retrieve their own private profile data.
 - Pet and profile photos use generated UUID filenames.
 - Uploaded files are validated by their detected file signature.
 - Detailed server errors are logged internally.

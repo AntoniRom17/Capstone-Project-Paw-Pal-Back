@@ -344,7 +344,6 @@ export const getSitterById = async (
         u.id,
         u.name,
         u.bio,
-        u.phone,
         u.city,
         u.state,
         u.zip_code AS "zipCode",
@@ -508,9 +507,10 @@ export const addSitterService = async (
     const sitterId =
       req.user.id || req.user.userId;
 
-    const serviceId = parsePositiveInteger(
-      req.body.serviceId,
-    );
+    const serviceId =
+      parsePositiveInteger(
+        req.body.serviceId,
+      );
 
     if (!serviceId) {
       return res.status(400).json({
@@ -521,10 +521,16 @@ export const addSitterService = async (
 
     let normalizedPriceOverride = null;
 
-    if (hasOwn(req.body, "priceOverride")) {
-      const parsedPrice = parsePriceOverride(
-        req.body.priceOverride,
-      );
+    if (
+      hasOwn(
+        req.body,
+        "priceOverride",
+      )
+    ) {
+      const parsedPrice =
+        parsePriceOverride(
+          req.body.priceOverride,
+        );
 
       if (parsedPrice.error) {
         return res.status(400).json({
@@ -633,9 +639,10 @@ export const updateSitterService = async (
       });
     }
 
-    const parsedPrice = parsePriceOverride(
-      req.body.priceOverride,
-    );
+    const parsedPrice =
+      parsePriceOverride(
+        req.body.priceOverride,
+      );
 
     if (parsedPrice.error) {
       return res.status(400).json({

@@ -225,7 +225,11 @@ CREATE INDEX idx_bookings_sitter_id
 CREATE UNIQUE INDEX
   idx_one_active_booking_per_availability
   ON bookings (availability_id)
-  WHERE status IN ('accepted', 'completed');
+  WHERE status IN (
+    'pending',
+    'accepted',
+    'completed'
+  );
 
 CREATE INDEX idx_messages_booking_created_at
   ON messages (

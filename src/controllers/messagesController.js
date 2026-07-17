@@ -1,20 +1,21 @@
-import { pool, query } from "../db/client.js";
+import {
+  pool,
+  query,
+} from "../db/client.js";
+import {
+  isPlainObject,
+  parsePositiveInteger,
+} from "../utils/validation.js";
 
 function getUserId(req) {
   return req.user.id || req.user.userId;
 }
 
-function parsePositiveInteger(value) {
-  const numericValue = Number(value);
-
-  if (!Number.isInteger(numericValue) || numericValue <= 0) {
-    return null;
-  }
-
-  return numericValue;
-}
-
-async function getAuthorizedBooking(client, bookingId, userId) {
+async function getAuthorizedBooking(
+  client,
+  bookingId,
+  userId,
+) {
   const result = await client.query(
     `
     SELECT
@@ -34,7 +35,11 @@ async function getAuthorizedBooking(client, bookingId, userId) {
   return result.rows[0] || null;
 }
 
-export async function getConversations(req, res, next) {
+export async function getConversations(
+  req,
+  res,
+  next,
+) {
   try {
     const userId = getUserId(req);
 
@@ -75,15 +80,18 @@ export async function getConversations(req, res, next) {
       JOIN pets
         ON pets.id = bookings.pet_id
       JOIN sitter_services
-        ON sitter_services.id = bookings.sitter_service_id
+        ON sitter_services.id =
+          bookings.sitter_service_id
       JOIN services
-        ON services.id = sitter_services.service_id
+        ON services.id =
+          sitter_services.service_id
       LEFT JOIN LATERAL (
         SELECT
           messages.body,
           messages.created_at
         FROM messages
-        WHERE messages.booking_id = bookings.id
+        WHERE messages.booking_id =
+          bookings.id
         ORDER BY
           messages.created_at DESC,
           messages.id DESC
@@ -91,9 +99,11 @@ export async function getConversations(req, res, next) {
       ) latest_message
         ON true
       LEFT JOIN LATERAL (
-        SELECT COUNT(*)::int AS unread_count
+        SELECT
+          COUNT(*)::int AS unread_count
         FROM messages
-        WHERE messages.booking_id = bookings.id
+        WHERE messages.booking_id =
+          bookings.id
           AND messages.recipient_id = $1
           AND messages.read_at IS NULL
       ) unread_messages
@@ -118,32 +128,43 @@ export async function getConversations(req, res, next) {
   }
 }
 
-export async function getBookingMessages(req, res, next) {
+export async function getBookingMessages(
+  req,
+  res,
+  next,
+) {
+  const userId = getUserId(req);
+
+  const bookingId =
+    parsePositiveInteger(
+      req.params.bookingId,
+    );
+
+  if (!bookingId) {
+    return res.status(400).json({
+      error:
+        "bookingId must be a positive integer",
+    });
+  }
+
   const client = await pool.connect();
 
   try {
-    const userId = getUserId(req);
-    const bookingId = parsePositiveInteger(req.params.bookingId);
-
-    if (!bookingId) {
-      return res.status(400).json({
-        error: "bookingId must be a positive integer",
-      });
-    }
-
     await client.query("BEGIN");
 
-    const booking = await getAuthorizedBooking(
-      client,
-      bookingId,
-      userId,
-    );
+    const booking =
+      await getAuthorizedBooking(
+        client,
+        bookingId,
+        userId,
+      );
 
     if (!booking) {
       await client.query("ROLLBACK");
 
       return res.status(404).json({
-        error: "Booking conversation not found",
+        error:
+          "Booking conversation not found",
       });
     }
 
@@ -190,53 +211,74 @@ export async function getBookingMessages(req, res, next) {
   }
 }
 
-export async function createMessage(req, res, next) {
+export async function createMessage(
+  req,
+  res,
+  next,
+) {
+  if (!isPlainObject(req.body)) {
+    return res.status(400).json({
+      error:
+        "Request body must be a JSON object",
+    });
+  }
+
+  const userId = getUserId(req);
+
+  const bookingId =
+    parsePositiveInteger(
+      req.body.bookingId,
+    );
+
+  const { body } = req.body;
+
+  if (!bookingId) {
+    return res.status(400).json({
+      error:
+        "bookingId must be a positive integer",
+    });
+  }
+
+  if (typeof body !== "string") {
+    return res.status(400).json({
+      error: "body must be a string",
+    });
+  }
+
+  const normalizedBody = body.trim();
+
+  if (!normalizedBody) {
+    return res.status(400).json({
+      error:
+        "Message body cannot be empty",
+    });
+  }
+
+  if (normalizedBody.length > 2000) {
+    return res.status(400).json({
+      error:
+        "Message body cannot exceed 2000 characters",
+    });
+  }
+
   const client = await pool.connect();
 
   try {
-    const userId = getUserId(req);
-    const bookingId = parsePositiveInteger(req.body.bookingId);
-    const { body } = req.body;
-
-    if (!bookingId) {
-      return res.status(400).json({
-        error: "bookingId must be a positive integer",
-      });
-    }
-
-    if (typeof body !== "string") {
-      return res.status(400).json({
-        error: "body must be a string",
-      });
-    }
-
-    const normalizedBody = body.trim();
-
-    if (!normalizedBody) {
-      return res.status(400).json({
-        error: "Message body cannot be empty",
-      });
-    }
-
-    if (normalizedBody.length > 2000) {
-      return res.status(400).json({
-        error: "Message body cannot exceed 2000 characters",
-      });
-    }
-
     await client.query("BEGIN");
 
-    const booking = await getAuthorizedBooking(
-      client,
-      bookingId,
-      userId,
-    );
+    const booking =
+      await getAuthorizedBooking(
+        client,
+        bookingId,
+        userId,
+      );
 
     if (!booking) {
       await client.query("ROLLBACK");
 
       return res.status(404).json({
-        error: "Booking conversation not found",
+        error:
+          "Booking conversation not found",
       });
     }
 
