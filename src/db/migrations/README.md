@@ -21,10 +21,10 @@ The migration runner:
 
 ## Creating A Migration
 
-When a real schema change is needed, create the next numbered SQL file:
+When a schema change is needed, create the next numbered SQL file:
 
 ```powershell
-New-Item -ItemType File -Path src\db\migrations\005_describe_the_change.sql
+New-Item -ItemType File -Path src\db\migrations\007_describe_the_change.sql
 ```
 
 Migration filenames must use this format:
@@ -33,13 +33,15 @@ Migration filenames must use this format:
 NNN_lowercase_description.sql
 ```
 
-Examples:
+Current application migrations:
 
 ```text
 001_initial_schema.sql
 002_prevent_availability_overlaps.sql
 003_add_account_deactivation.sql
 004_add_review_punctuality.sql
+005_replace_pet_photo_urls.sql
+006_add_user_profile_photos.sql
 ```
 
 A future migration might contain SQL such as:
@@ -62,7 +64,7 @@ Never add `DROP TABLE` statements to a deployment migration unless permanent dat
 
 Never edit, rename, or delete a migration after it has been applied to a shared database.
 
-The runner will reject changed files because their names or checksums will no longer match the records in `schema_migrations`.
+The runner rejects changed files because their names or checksums no longer match the records in `schema_migrations`.
 
 Create a new numbered migration for every later schema change.
 

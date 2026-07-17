@@ -2,7 +2,7 @@
 
 Backend API for PawPal, a pet sitting and dog walking marketplace capstone project.
 
-This backend handles authentication, users, sitters, pets, pet photo uploads, services, availability, bookings, reviews, trust scores, background checks, and messaging.
+This backend handles authentication, users, sitters, pets, pet and profile photo uploads, services, availability, bookings, reviews, trust scores, background checks, and messaging.
 
 ## Tech Stack
 
@@ -59,6 +59,8 @@ BACKGROUND_CHECK_WEBHOOK_SECRET=replace_with_a_separate_random_secret
 CLIENT_URL=http://localhost:5173
 PET_PHOTO_UPLOAD_DIR=uploads/pets
 PET_PHOTO_MAX_BYTES=5242880
+PROFILE_PHOTO_UPLOAD_DIR=uploads/profiles
+PROFILE_PHOTO_MAX_BYTES=5242880
 ```
 
 `DATABASE_URL` and `TEST_DATABASE_URL` must point to separate PostgreSQL databases.
@@ -157,6 +159,8 @@ POST /api/auth/register
 POST /api/auth/login
 ```
 
+Authentication responses include `hasProfilePhoto`. Stored filenames and filesystem paths are never returned.
+
 ### Account Management
 
 ```http
@@ -165,6 +169,78 @@ PATCH /api/users/me
 PATCH /api/users/me/password
 DELETE /api/users/me
 ```
+
+### Profile Photos
+
+```http
+POST /api/users/me/photo
+GET /api/users/:id/photo
+DELETE /api/users/me/photo
+```
+
+Owners and sitters can upload a profile-picture file selected from a phone, tablet, or computer.
+
+Users do not submit profile-picture URLs. The selected file is sent to the backend using `multipart/form-data`.
+
+#### Upload a Profile Photo
+
+Send the file using the multipart field name `photo`:
+
+```bash
+curl -X POST http://localhost:3000/api/users/me/photo \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "photo=@path/to/profile-photo.jpg"
+```
+
+The upload endpoint requires authentication. Both owners and sitters may use it.
+
+Supported file types:
+
+```text
+JPEG
+PNG
+WebP
+```
+
+The default maximum profile-photo size is 5 MB. Configure it with `PROFILE_PHOTO_MAX_BYTES`.
+
+The backend verifies the actual file signature instead of trusting only the submitted filename or content type.
+
+Uploading another profile photo replaces the existing file.
+
+User, authentication, and sitter responses include:
+
+```json
+{
+  "hasProfilePhoto": true
+}
+```
+
+The boolean tells the frontend whether it should request the image. It does not expose the stored filename.
+
+#### Retrieve a Profile Photo
+
+```http
+GET /api/users/:id/photo
+```
+
+Profile-photo retrieval is public for active users so images can be shown in sitter searches and profile pages.
+
+The response contains the image bytes and verified content type.
+
+Invalid IDs return `400`. Missing users, inactive users, and users without profile photos return `404`.
+
+#### Delete a Profile Photo
+
+```http
+DELETE /api/users/me/photo
+```
+
+The delete endpoint requires authentication.
+
+Deleting a profile photo removes the stored file and clears its database metadata.
+
+Successfully deactivating an account also removes its profile photo. A failed deactivation leaves the file and metadata unchanged.
 
 ### Services
 
@@ -183,6 +259,10 @@ PATCH /api/sitters/me/services/:id
 DELETE /api/sitters/me/services/:id
 POST /api/sitters/me/background-check
 ```
+
+Sitter list and detail responses include `hasProfilePhoto`.
+
+Sitter reviews include `reviewerHasProfilePhoto` for the reviewing owner.
 
 Sitter search supports:
 
@@ -366,11 +446,12 @@ availability
 bookings
 reviews
 messages
-background_checks
 schema_migrations
 ```
 
-Pet image files are stored on the filesystem. Only the generated filename and verified content type are stored in PostgreSQL.
+Uploaded image files are stored on the filesystem.
+
+PostgreSQL stores only generated filenames and verified content types. API responses expose only `hasPhoto` or `hasProfilePhoto` booleans.
 
 ## Tests
 
@@ -380,6 +461,7 @@ Backend tests are located in:
 test/backend.test.js
 test/migrations.test.js
 test/petPhotos.test.js
+test/profilePhotos.test.js
 test/trustScore.test.js
 ```
 
@@ -396,6 +478,11 @@ The test suite covers:
 - Pet permissions and deletion conflicts
 - Pet photo upload, replacement, retrieval, and deletion
 - Pet photo authentication and file validation
+- Profile photo uploads for owners and sitters
+- Profile photo replacement, retrieval, and deletion
+- Profile photo authentication and file validation
+- Profile photo cleanup during account deactivation
+- Profile photo state in authentication and sitter responses
 - Availability validation and overlap protection
 - Booking creation and status transitions
 - Sitter service management
@@ -405,19 +492,24 @@ The test suite covers:
 - Message authentication and permissions
 - Database migration safety and rollback behavior
 
-## Pet Photo Storage
+The current suite contains 71 tests.
 
-The default upload directory is:
+## Uploaded Photo Storage
+
+Default upload directories:
 
 ```text
 uploads/pets
+uploads/profiles
 ```
 
-The directory is created automatically when the first valid photo is uploaded.
+The directories are created automatically when the first valid file is uploaded.
 
-Production deployments must use persistent storage for this directory. Files stored only inside an ephemeral deployment filesystem may be lost when the application restarts or redeploys.
+Uploaded files use generated UUID filenames. Original client filenames are not used for storage.
 
-Generated upload filenames must not be accepted directly from API clients.
+Production deployments must use persistent storage for both directories. Files stored only inside an ephemeral deployment filesystem may be lost when the application restarts or redeploys.
+
+Generated upload filenames must never be accepted directly from API clients.
 
 ## Notes
 
@@ -425,7 +517,7 @@ Generated upload filenames must not be accepted directly from API clients.
 - Passwords are hashed with `bcrypt`.
 - Authentication uses JWT tokens.
 - SQL queries use the `pg` PostgreSQL client.
-- Uploaded pet photos use generated UUID filenames.
+- Pet and profile photos use generated UUID filenames.
 - Uploaded files are validated by their detected file signature.
 - Detailed server errors are logged internally.
 - Production error responses do not expose database details.
