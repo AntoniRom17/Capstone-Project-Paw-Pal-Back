@@ -1,19 +1,76 @@
 import { Router } from "express";
 import {
-  getPets,
   createPet,
-  getPetById,
-  updatePet,
   deletePet,
+  deletePetPhotoFile,
+  getPetById,
+  getPetPhotoFile,
+  getPets,
+  updatePet,
+  uploadPetPhotoFile,
 } from "../controllers/petsController.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+import {
+  requireAuth,
+  requireRole,
+} from "../middleware/auth.js";
+import {
+  uploadPetPhoto,
+} from "../middleware/petPhotoUpload.js";
 
 const router = Router();
 
-router.get("/", requireAuth, requireRole("owner"), getPets);
-router.post("/", requireAuth, requireRole("owner"), createPet);
-router.get("/:id", requireAuth, requireRole("owner"), getPetById);
-router.put("/:id", requireAuth, requireRole("owner"), updatePet);
-router.delete("/:id", requireAuth, requireRole("owner"), deletePet);
+const ownerOnly = [
+  requireAuth,
+  requireRole("owner"),
+];
+
+router.get(
+  "/",
+  ...ownerOnly,
+  getPets,
+);
+
+router.post(
+  "/",
+  ...ownerOnly,
+  createPet,
+);
+
+router.post(
+  "/:id/photo",
+  ...ownerOnly,
+  uploadPetPhoto,
+  uploadPetPhotoFile,
+);
+
+router.get(
+  "/:id/photo",
+  ...ownerOnly,
+  getPetPhotoFile,
+);
+
+router.delete(
+  "/:id/photo",
+  ...ownerOnly,
+  deletePetPhotoFile,
+);
+
+router.get(
+  "/:id",
+  ...ownerOnly,
+  getPetById,
+);
+
+router.put(
+  "/:id",
+  ...ownerOnly,
+  updatePet,
+);
+
+router.delete(
+  "/:id",
+  ...ownerOnly,
+  deletePet,
+);
 
 export default router;

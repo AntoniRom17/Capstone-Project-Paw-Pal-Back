@@ -60,8 +60,21 @@ CREATE TABLE pets (
   breed VARCHAR(50),
   age INTEGER CHECK (age >= 0),
   care_notes TEXT,
-  photo_url TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  photo_filename VARCHAR(255),
+  photo_content_type VARCHAR(50),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT pets_photo_metadata_complete
+    CHECK (
+      (
+        photo_filename IS NULL
+        AND photo_content_type IS NULL
+      )
+      OR
+      (
+        photo_filename IS NOT NULL
+        AND photo_content_type IS NOT NULL
+      )
+    )
 );
 
 CREATE TABLE services (

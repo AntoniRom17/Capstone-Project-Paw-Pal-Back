@@ -166,13 +166,14 @@ describe(
         logger: silentLogger,
       });
 
-      assert.equal(firstRun.total, 4);
+      assert.equal(firstRun.total, 5);
 
       assert.deepEqual(firstRun.applied, [
         "001_initial_schema.sql",
         "002_prevent_availability_overlaps.sql",
         "003_add_account_deactivation.sql",
         "004_add_review_punctuality.sql",
+        "005_replace_pet_photo_urls.sql",
       ]);
 
       const { rows: userRows } =
@@ -215,7 +216,7 @@ describe(
 
       assert.equal(
         migrationRows.length,
-        4,
+        5,
       );
 
       assert.ok(
@@ -230,7 +231,7 @@ describe(
         logger: silentLogger,
       });
 
-      assert.equal(secondRun.total, 4);
+      assert.equal(secondRun.total, 5);
 
       assert.deepEqual(
         secondRun.applied,
@@ -261,13 +262,14 @@ describe(
         logger: silentLogger,
       });
 
-      assert.equal(result.total, 4);
+      assert.equal(result.total, 5);
 
       assert.deepEqual(result.applied, [
         "001_initial_schema.sql",
         "002_prevent_availability_overlaps.sql",
         "003_add_account_deactivation.sql",
         "004_add_review_punctuality.sql",
+        "005_replace_pet_photo_urls.sql",
       ]);
 
       const { rows: tableRows } =
@@ -392,7 +394,7 @@ describe(
 
       assert.equal(
         migrationRows[0].count,
-        4,
+        5,
       );
     });
 
