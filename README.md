@@ -405,6 +405,7 @@ Booking rules:
 - Expired availability cannot be booked.
 - Sitters can accept, decline, or complete bookings.
 - Owners can cancel eligible bookings.
+- Accepted bookings cannot be completed before their scheduled end time.
 - Availability is marked booked when a booking is created.
 - Declined bookings release availability.
 
@@ -484,6 +485,7 @@ Backend tests are located in:
 
 ```text
 test/backend.test.js
+test/bookingCompletion.test.js
 test/migrations.test.js
 test/petPhotos.test.js
 test/profilePhotos.test.js
@@ -511,6 +513,7 @@ The test suite covers:
 - Profile photo state in authentication and sitter responses
 - Availability validation and overlap protection
 - Booking creation and status transitions
+- Booking completion timing
 - Sitter service management
 - Review validation
 - Trust Score behavior
@@ -519,7 +522,7 @@ The test suite covers:
 - Database migration safety and rollback behavior
 - Destructive database reset protection
 
-The current suite contains 80 tests.
+The current suite contains 82 tests.
 
 ## Uploaded Photo Storage
 
