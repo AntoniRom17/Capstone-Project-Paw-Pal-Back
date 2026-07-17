@@ -22,6 +22,7 @@ This backend handles authentication, users, sitters, pets, pet and profile photo
 ```text
 Capstone-Project-Paw-Pal-Back/
 ├── src/
+│   ├── config/
 │   ├── controllers/
 │   ├── db/
 │   │   └── migrations/
@@ -57,6 +58,7 @@ JWT_SECRET=replace_with_a_long_random_secret
 JWT_EXPIRES_IN=21d
 BACKGROUND_CHECK_WEBHOOK_SECRET=replace_with_a_separate_random_secret
 CLIENT_URL=http://localhost:5173
+APP_TIME_ZONE=America/Chicago
 PET_PHOTO_UPLOAD_DIR=uploads/pets
 PET_PHOTO_MAX_BYTES=5242880
 PROFILE_PHOTO_UPLOAD_DIR=uploads/profiles
@@ -66,6 +68,8 @@ PROFILE_PHOTO_MAX_BYTES=5242880
 `DATABASE_URL` and `TEST_DATABASE_URL` must point to separate PostgreSQL databases.
 
 The test database name must include `test`. The test suite refuses to run when both database URLs point to the same database.
+
+`APP_TIME_ZONE` must be a valid IANA timezone such as `America/Chicago` or `UTC`.
 
 ## Scripts
 
@@ -137,6 +141,36 @@ Use migrations instead of `db:reset` when updating an existing or deployed datab
 ```bash
 npm run db:migrate
 ```
+
+## Timezone Behavior
+
+PawPal stores availability and booking schedules as PostgreSQL `DATE` and `TIME` values.
+
+All scheduling comparisons use the timezone configured by:
+
+```env
+APP_TIME_ZONE=America/Chicago
+```
+
+This includes:
+
+- Rejecting past availability
+- Filtering expired availability
+- Preventing expired bookings
+- Determining when bookings may be completed
+- Generating dates used by database seed data
+
+Every PostgreSQL connection is configured with `APP_TIME_ZONE`, so behavior does not depend on the operating system or database server’s default timezone.
+
+When `APP_TIME_ZONE` is omitted, the backend defaults to:
+
+```text
+UTC
+```
+
+PostgreSQL `DATE` values are returned as `YYYY-MM-DD` strings. They are not converted into JavaScript `Date` objects, preventing calendar dates from shifting when the server runs in another timezone.
+
+The frontend should treat booking and availability dates and times as calendar values in `APP_TIME_ZONE`. They should not be interpreted as UTC timestamps.
 
 ## API Base URL
 
@@ -379,6 +413,7 @@ Availability rules:
 - Overlapping availability is rejected.
 - Booked availability cannot be edited or deleted.
 - Public availability only returns future, unbooked slots.
+- Date and time values use `APP_TIME_ZONE`.
 
 ### Bookings
 
@@ -408,6 +443,7 @@ Booking rules:
 - Accepted bookings cannot be completed before their scheduled end time.
 - Availability is marked booked when a booking is created.
 - Declined bookings release availability.
+- Date and time values use `APP_TIME_ZONE`.
 
 ### Reviews
 
@@ -490,6 +526,7 @@ test/migrations.test.js
 test/petPhotos.test.js
 test/profilePhotos.test.js
 test/resetSafety.test.js
+test/timeZone.test.js
 test/trustScore.test.js
 ```
 
@@ -514,6 +551,8 @@ The test suite covers:
 - Availability validation and overlap protection
 - Booking creation and status transitions
 - Booking completion timing
+- Application and PostgreSQL timezone configuration
+- PostgreSQL calendar-date serialization
 - Sitter service management
 - Review validation
 - Trust Score behavior
@@ -522,7 +561,7 @@ The test suite covers:
 - Database migration safety and rollback behavior
 - Destructive database reset protection
 
-The current suite contains 82 tests.
+The current suite contains 87 tests.
 
 ## Uploaded Photo Storage
 
@@ -547,6 +586,8 @@ Generated upload filenames must never be accepted directly from API clients.
 - Passwords are hashed with `bcrypt`.
 - Authentication uses JWT tokens.
 - SQL queries use the `pg` PostgreSQL client.
+- Database sessions use `APP_TIME_ZONE`.
+- PostgreSQL calendar dates remain `YYYY-MM-DD` strings.
 - Pet and profile photos use generated UUID filenames.
 - Uploaded files are validated by their detected file signature.
 - Detailed server errors are logged internally.
