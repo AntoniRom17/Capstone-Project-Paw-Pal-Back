@@ -205,6 +205,23 @@ API errors follow this format:
 
 Malformed request bodies and invalid route IDs return `400 Bad Request`. Validation failures do not expose database or server details.
 
+## Privacy
+
+Public sitter endpoints expose information needed for sitter discovery, including names, bios, locations, services, availability, ratings, Trust Scores, and profile-photo state.
+
+Public sitter responses do not expose phone numbers. A user’s phone number remains available through their own authenticated account response:
+
+```http
+GET /api/users/me
+```
+
+The frontend must not expect `phone` in responses from:
+
+```http
+GET /api/sitters
+GET /api/sitters/:id
+```
+
 ## Routes
 
 ### Health
@@ -230,6 +247,8 @@ PATCH /api/users/me
 PATCH /api/users/me/password
 DELETE /api/users/me
 ```
+
+`GET /api/users/me` returns the authenticated user’s private account information, including their own email and phone number.
 
 ### Profile Photos
 
@@ -324,6 +343,8 @@ POST /api/sitters/me/background-check
 Sitter list and detail responses include `hasProfilePhoto`.
 
 Sitter reviews include `reviewerHasProfilePhoto` for the reviewing owner.
+
+Public sitter list and detail responses do not include phone numbers.
 
 Sitter search supports:
 
@@ -543,6 +564,7 @@ test/migrations.test.js
 test/petPhotos.test.js
 test/profilePhotos.test.js
 test/resetSafety.test.js
+test/sitterPrivacy.test.js
 test/timeZone.test.js
 test/trustScore.test.js
 ```
@@ -571,6 +593,8 @@ The test suite covers:
 - Application and PostgreSQL timezone configuration
 - PostgreSQL calendar-date serialization
 - Sitter service management
+- Public sitter phone-number privacy
+- Authenticated access to private profile information
 - Review validation
 - Trust Score behavior
 - Background-check workflows
@@ -580,7 +604,7 @@ The test suite covers:
 - Database migration safety and rollback behavior
 - Destructive database reset protection
 
-The current suite contains 91 tests.
+The current suite contains 94 tests.
 
 ## Uploaded Photo Storage
 
@@ -607,6 +631,8 @@ Generated upload filenames must never be accepted directly from API clients.
 - SQL queries use the `pg` PostgreSQL client.
 - Database sessions use `APP_TIME_ZONE`.
 - PostgreSQL calendar dates remain `YYYY-MM-DD` strings.
+- Public sitter endpoints do not expose phone numbers.
+- Authenticated users can retrieve their own private profile data.
 - Pet and profile photos use generated UUID filenames.
 - Uploaded files are validated by their detected file signature.
 - Detailed server errors are logged internally.
