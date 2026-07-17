@@ -2,7 +2,7 @@
 
 Backend API for PawPal, a pet sitting and dog walking marketplace capstone project.
 
-This backend handles authentication, users, sitters, pets, services, availability, bookings, reviews, and messaging.
+This backend handles authentication, users, sitters, pets, pet photo uploads, services, availability, bookings, reviews, trust scores, background checks, and messaging.
 
 ## Tech Stack
 
@@ -12,23 +12,31 @@ This backend handles authentication, users, sitters, pets, services, availabilit
 - JWT authentication
 - bcrypt
 - pg
+- Multer
+- file-type
 - dotenv
 - Node test runner
 
 ## Folder Structure
 
 ```text
-server/
+Capstone-Project-Paw-Pal-Back/
 ├── src/
 │   ├── controllers/
 │   ├── db/
+│   │   └── migrations/
 │   ├── middleware/
 │   ├── routes/
+│   ├── utils/
 │   └── index.js
 ├── test/
+├── uploads/
+├── .env.example
 ├── package.json
 └── package-lock.json
 ```
+
+The `uploads` directory contains runtime-uploaded files and is excluded from Git.
 
 ## Setup
 
@@ -44,10 +52,18 @@ Create a `.env` file in the backend folder:
 PORT=3000
 NODE_ENV=development
 DATABASE_URL=postgresql://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/pawpal
+TEST_DATABASE_URL=postgresql://postgres:YOUR_POSTGRES_PASSWORD@localhost:5432/pawpal_test
 JWT_SECRET=replace_with_a_long_random_secret
 JWT_EXPIRES_IN=21d
+BACKGROUND_CHECK_WEBHOOK_SECRET=replace_with_a_separate_random_secret
 CLIENT_URL=http://localhost:5173
+PET_PHOTO_UPLOAD_DIR=uploads/pets
+PET_PHOTO_MAX_BYTES=5242880
 ```
+
+`DATABASE_URL` and `TEST_DATABASE_URL` must point to separate PostgreSQL databases.
+
+The test database name must include `test`. The test suite refuses to run when both database URLs point to the same database.
 
 ## Scripts
 
@@ -57,7 +73,7 @@ Start the development server:
 npm run dev
 ```
 
-Start the server:
+Start the production server:
 
 ```bash
 npm start
@@ -75,7 +91,13 @@ Test the database connection:
 npm run db:test
 ```
 
-Reset the database schema:
+Apply non-destructive database migrations:
+
+```bash
+npm run db:migrate
+```
+
+Reset the local database schema:
 
 ```bash
 npm run db:reset
@@ -87,7 +109,7 @@ Seed the database:
 npm run db:seed
 ```
 
-Warning: `npm run db:reset` drops and recreates the PawPal database tables.
+Warning: `npm run db:reset` drops and recreates the PawPal database tables. Use migrations when updating an existing database.
 
 ## API Base URL
 
@@ -128,11 +150,20 @@ API errors follow this format:
 GET /api/health
 ```
 
-### Auth
+### Authentication
 
 ```http
 POST /api/auth/register
 POST /api/auth/login
+```
+
+### Account Management
+
+```http
+GET /api/users/me
+PATCH /api/users/me
+PATCH /api/users/me/password
+DELETE /api/users/me
 ```
 
 ### Services
@@ -146,7 +177,11 @@ GET /api/services
 ```http
 GET /api/sitters
 GET /api/sitters/:id
+GET /api/sitters/:id/availability
 POST /api/sitters/me/services
+PATCH /api/sitters/me/services/:id
+DELETE /api/sitters/me/services/:id
+POST /api/sitters/me/background-check
 ```
 
 Sitter search supports:
@@ -168,11 +203,58 @@ POST /api/pets
 GET /api/pets/:id
 PUT /api/pets/:id
 DELETE /api/pets/:id
+POST /api/pets/:id/photo
+GET /api/pets/:id/photo
+DELETE /api/pets/:id/photo
 ```
 
-Pet routes are owner-only.
+Pet routes are authenticated and owner-only. Owners can only access their own pets.
 
-Owners can only access their own pets.
+Pet records return `hasPhoto` to indicate whether a photo is available. Stored filenames and filesystem paths are not exposed.
+
+The legacy `photoUrl` property is not accepted. Pet photos must be uploaded as files using the photo endpoint.
+
+#### Upload a Pet Photo
+
+Send a `multipart/form-data` request using the field name `photo`:
+
+```bash
+curl -X POST http://localhost:3000/api/pets/1/photo \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "photo=@path/to/pet-photo.jpg"
+```
+
+Supported file types:
+
+```text
+JPEG
+PNG
+WebP
+```
+
+The default maximum file size is 5 MB. Configure it with `PET_PHOTO_MAX_BYTES`.
+
+The server verifies the file contents instead of trusting only the filename extension or submitted content type.
+
+Uploading another photo for the same pet replaces the existing photo.
+
+#### Retrieve a Pet Photo
+
+```http
+GET /api/pets/:id/photo
+```
+
+The response contains the image file with its stored content type. Authentication is required.
+
+#### Delete a Pet Photo
+
+```http
+DELETE /api/pets/:id/photo
+```
+
+Deleting a photo removes the file and clears its database metadata.
+
+Deleting a pet also removes its photo after the pet is successfully deleted from the database.
 
 ### Availability
 
@@ -189,6 +271,8 @@ Availability rules:
 - Only sitters can create, update, or delete availability.
 - Sitters can only manage their own availability.
 - Past availability creation is rejected.
+- Overlapping availability is rejected.
+- Booked availability cannot be edited or deleted.
 - Public availability only returns future, unbooked slots.
 
 ### Bookings
@@ -213,6 +297,7 @@ Booking rules:
 
 - Owners can create booking requests.
 - Owners can only book using their own pets.
+- Expired availability cannot be booked.
 - Sitters can accept, decline, or complete bookings.
 - Owners can cancel eligible bookings.
 - Availability is marked booked when a booking is created.
@@ -230,7 +315,8 @@ Review rules:
 - Owners can only review completed bookings.
 - Each booking can only be reviewed once.
 - Ratings must be integers from 1 to 5.
-- Duplicate reviews return `409`.
+- Duplicate reviews return `409 Conflict`.
+- Completed reviews update sitter trust metrics.
 
 ### Messages
 
@@ -251,13 +337,25 @@ Messaging rules:
 
 ## Database
 
-The database schema is located at:
+The current development schema is located at:
 
 ```text
 src/db/schema.sql
 ```
 
-Main tables:
+Numbered production migrations are located at:
+
+```text
+src/db/migrations/
+```
+
+Apply pending migrations with:
+
+```bash
+npm run db:migrate
+```
+
+Main tables include:
 
 ```text
 users
@@ -268,37 +366,58 @@ availability
 bookings
 reviews
 messages
+background_checks
+schema_migrations
 ```
+
+Pet image files are stored on the filesystem. Only the generated filename and verified content type are stored in PostgreSQL.
 
 ## Tests
 
-Backend tests are located at:
+Backend tests are located in:
 
 ```text
 test/backend.test.js
+test/migrations.test.js
+test/petPhotos.test.js
+test/trustScore.test.js
 ```
 
-Run tests with:
+Run the complete test suite with:
 
 ```bash
 npm test
 ```
 
-The backend test suite covers:
+The test suite covers:
 
-- Health endpoint
-- Pet permissions
-- Availability validation
-- Booking creation
-- Booking status updates
-- Review creation
-- Duplicate review prevention
-- Message authentication
-- Message permissions
-- Message sending
-- Message reading
-- Message validation
-- Message ordering
+- Authentication and account management
+- Request validation
+- Pet permissions and deletion conflicts
+- Pet photo upload, replacement, retrieval, and deletion
+- Pet photo authentication and file validation
+- Availability validation and overlap protection
+- Booking creation and status transitions
+- Sitter service management
+- Review validation
+- Trust Score behavior
+- Background-check workflows
+- Message authentication and permissions
+- Database migration safety and rollback behavior
+
+## Pet Photo Storage
+
+The default upload directory is:
+
+```text
+uploads/pets
+```
+
+The directory is created automatically when the first valid photo is uploaded.
+
+Production deployments must use persistent storage for this directory. Files stored only inside an ephemeral deployment filesystem may be lost when the application restarts or redeploys.
+
+Generated upload filenames must not be accepted directly from API clients.
 
 ## Notes
 
@@ -306,4 +425,8 @@ The backend test suite covers:
 - Passwords are hashed with `bcrypt`.
 - Authentication uses JWT tokens.
 - SQL queries use the `pg` PostgreSQL client.
+- Uploaded pet photos use generated UUID filenames.
+- Uploaded files are validated by their detected file signature.
+- Detailed server errors are logged internally.
+- Production error responses do not expose database details.
 - The backend server entry point is `src/index.js`.
