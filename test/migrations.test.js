@@ -21,6 +21,15 @@ const silentLogger = {
   log() {},
 };
 
+const APPLICATION_MIGRATIONS = [
+  "001_initial_schema.sql",
+  "002_prevent_availability_overlaps.sql",
+  "003_add_account_deactivation.sql",
+  "004_add_review_punctuality.sql",
+  "005_replace_pet_photo_urls.sql",
+  "006_add_user_profile_photos.sql",
+];
+
 function assertSafeTestDatabase() {
   if (process.env.NODE_ENV !== "test") {
     throw new Error(
@@ -166,15 +175,15 @@ describe(
         logger: silentLogger,
       });
 
-      assert.equal(firstRun.total, 5);
+      assert.equal(
+        firstRun.total,
+        APPLICATION_MIGRATIONS.length,
+      );
 
-      assert.deepEqual(firstRun.applied, [
-        "001_initial_schema.sql",
-        "002_prevent_availability_overlaps.sql",
-        "003_add_account_deactivation.sql",
-        "004_add_review_punctuality.sql",
-        "005_replace_pet_photo_urls.sql",
-      ]);
+      assert.deepEqual(
+        firstRun.applied,
+        APPLICATION_MIGRATIONS,
+      );
 
       const { rows: userRows } =
         await pool.query(
@@ -182,7 +191,11 @@ describe(
           SELECT
             id,
             email,
-            is_active AS "isActive"
+            is_active AS "isActive",
+            profile_photo_filename
+              AS "profilePhotoFilename",
+            profile_photo_content_type
+              AS "profilePhotoContentType"
           FROM users
           WHERE id = $1;
           `,
@@ -201,6 +214,16 @@ describe(
         true,
       );
 
+      assert.equal(
+        userRows[0].profilePhotoFilename,
+        null,
+      );
+
+      assert.equal(
+        userRows[0].profilePhotoContentType,
+        null,
+      );
+
       const { rows: migrationRows } =
         await pool.query(
           `
@@ -216,7 +239,7 @@ describe(
 
       assert.equal(
         migrationRows.length,
-        5,
+        APPLICATION_MIGRATIONS.length,
       );
 
       assert.ok(
@@ -231,7 +254,10 @@ describe(
         logger: silentLogger,
       });
 
-      assert.equal(secondRun.total, 5);
+      assert.equal(
+        secondRun.total,
+        APPLICATION_MIGRATIONS.length,
+      );
 
       assert.deepEqual(
         secondRun.applied,
@@ -262,15 +288,15 @@ describe(
         logger: silentLogger,
       });
 
-      assert.equal(result.total, 5);
+      assert.equal(
+        result.total,
+        APPLICATION_MIGRATIONS.length,
+      );
 
-      assert.deepEqual(result.applied, [
-        "001_initial_schema.sql",
-        "002_prevent_availability_overlaps.sql",
-        "003_add_account_deactivation.sql",
-        "004_add_review_punctuality.sql",
-        "005_replace_pet_photo_urls.sql",
-      ]);
+      assert.deepEqual(
+        result.applied,
+        APPLICATION_MIGRATIONS,
+      );
 
       const { rows: tableRows } =
         await pool.query(
@@ -320,7 +346,9 @@ describe(
             table_name = 'users'
             AND column_name IN (
               'is_active',
-              'deactivated_at'
+              'deactivated_at',
+              'profile_photo_filename',
+              'profile_photo_content_type'
             )
           )
           OR (
@@ -346,6 +374,16 @@ describe(
           tableName: "users",
           columnName: "is_active",
         },
+        {
+          tableName: "users",
+          columnName:
+            "profile_photo_content_type",
+        },
+        {
+          tableName: "users",
+          columnName:
+            "profile_photo_filename",
+        },
       ]);
 
       const { rows: constraintRows } =
@@ -361,6 +399,24 @@ describe(
 
       assert.equal(
         constraintRows[0].count,
+        1,
+      );
+
+      const {
+        rows: profileConstraintRows,
+      } = await pool.query(
+        `
+        SELECT COUNT(*)::integer AS count
+        FROM pg_constraint
+        WHERE conrelid = 'users'::regclass
+          AND conname =
+            'users_profile_photo_metadata_complete'
+          AND contype = 'c';
+        `,
+      );
+
+      assert.equal(
+        profileConstraintRows[0].count,
         1,
       );
 
@@ -394,7 +450,7 @@ describe(
 
       assert.equal(
         migrationRows[0].count,
-        5,
+        APPLICATION_MIGRATIONS.length,
       );
     });
 
