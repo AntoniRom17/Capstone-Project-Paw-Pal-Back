@@ -203,6 +203,8 @@ API errors follow this format:
 }
 ```
 
+Malformed request bodies and invalid route IDs return `400 Bad Request`. Validation failures do not expose database or server details.
+
 ## Routes
 
 ### Health
@@ -472,10 +474,24 @@ Messaging rules:
 
 - Users must be authenticated.
 - Only booking participants can access messages.
+- `POST /api/messages` requires a JSON object.
+- `bookingId` must be a positive safe integer.
+- Malformed and coercive booking IDs are rejected.
+- Missing message fields return `400 Bad Request`.
+- Message bodies must be strings.
 - Message bodies cannot be empty.
 - Message bodies cannot exceed 2000 characters.
 - Messages are returned chronologically.
 - Reading messages marks them as read.
+
+Example message request:
+
+```json
+{
+  "bookingId": 1,
+  "body": "Is tomorrow still a good time?"
+}
+```
 
 ## Database
 
@@ -522,6 +538,7 @@ Backend tests are located in:
 ```text
 test/backend.test.js
 test/bookingCompletion.test.js
+test/messageValidation.test.js
 test/migrations.test.js
 test/petPhotos.test.js
 test/profilePhotos.test.js
@@ -558,10 +575,12 @@ The test suite covers:
 - Trust Score behavior
 - Background-check workflows
 - Message authentication and permissions
+- Missing and malformed message request bodies
+- Strict message booking-ID validation
 - Database migration safety and rollback behavior
 - Destructive database reset protection
 
-The current suite contains 87 tests.
+The current suite contains 91 tests.
 
 ## Uploaded Photo Storage
 
