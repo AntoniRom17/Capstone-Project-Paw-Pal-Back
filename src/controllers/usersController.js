@@ -1,12 +1,19 @@
 import bcrypt from "bcrypt";
 import { pool, query } from "../db/client.js";
 import {
+  deleteProfilePhoto,
+  ProfilePhotoStorageError,
+  readProfilePhoto,
+  saveProfilePhoto,
+} from "../utils/profilePhotoStorage.js";
+import {
   hasOwn,
   isPlainObject,
   isStringWithinLength,
   isValidEmail,
   isValidState,
   isValidZipCode,
+  parsePositiveInteger,
 } from "../utils/validation.js";
 
 const PROFILE_FIELDS = [
@@ -18,6 +25,28 @@ const PROFILE_FIELDS = [
   "state",
   "zipCode",
 ];
+
+const USER_RESPONSE_FIELDS = `
+  id,
+  name,
+  email,
+  role,
+  bio,
+  phone,
+  city,
+  state,
+  zip_code AS "zipCode",
+  (
+    profile_photo_filename IS NOT NULL
+  ) AS "hasProfilePhoto",
+  trust_score AS "trustScore",
+  background_check_status
+    AS "backgroundCheckStatus",
+  on_time_percentage AS "onTimePercentage",
+  is_active AS "isActive",
+  deactivated_at AS "deactivatedAt",
+  created_at AS "createdAt"
+`;
 
 function getUserId(req) {
   return req.user.id || req.user.userId;
@@ -107,6 +136,45 @@ function parseNullableString(
   };
 }
 
+async function deleteStoredProfilePhotoSafely(
+  filename,
+  reason,
+) {
+  if (!filename) {
+    return;
+  }
+
+  try {
+    await deleteProfilePhoto(filename);
+  } catch (error) {
+    console.error(
+      "Profile photo cleanup failed",
+      {
+        reason,
+        message: error.message,
+      },
+    );
+  }
+}
+
+async function rollbackSafely(client) {
+  try {
+    await client.query("ROLLBACK");
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
+function sendStorageError(
+  error,
+  res,
+) {
+  return res.status(error.status).json({
+    error: error.message,
+  });
+}
+
 export async function getCurrentUser(
   req,
   res,
@@ -118,22 +186,7 @@ export async function getCurrentUser(
     const result = await query(
       `
       SELECT
-        id,
-        name,
-        email,
-        role,
-        bio,
-        phone,
-        city,
-        state,
-        zip_code AS "zipCode",
-        trust_score AS "trustScore",
-        background_check_status
-          AS "backgroundCheckStatus",
-        on_time_percentage AS "onTimePercentage",
-        is_active AS "isActive",
-        deactivated_at AS "deactivatedAt",
-        created_at AS "createdAt"
+        ${USER_RESPONSE_FIELDS}
       FROM users
       WHERE id = $1
         AND is_active = true;
@@ -342,22 +395,7 @@ export async function updateCurrentUser(
       WHERE id = $15
         AND is_active = true
       RETURNING
-        id,
-        name,
-        email,
-        role,
-        bio,
-        phone,
-        city,
-        state,
-        zip_code AS "zipCode",
-        trust_score AS "trustScore",
-        background_check_status
-          AS "backgroundCheckStatus",
-        on_time_percentage AS "onTimePercentage",
-        is_active AS "isActive",
-        deactivated_at AS "deactivatedAt",
-        created_at AS "createdAt";
+        ${USER_RESPONSE_FIELDS};
       `,
       [
         hasName,
@@ -506,12 +544,293 @@ export async function changePassword(
   }
 }
 
+export async function uploadCurrentUserProfilePhoto(
+  req,
+  res,
+  next,
+) {
+  if (!req.file) {
+    return res.status(400).json({
+      error:
+        "A profile photo file is required",
+    });
+  }
+
+  const userId = getUserId(req);
+  const client = await pool.connect();
+
+  let transactionStarted = false;
+  let storedPhoto = null;
+
+  try {
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const existingResult =
+      await client.query(
+        `
+        SELECT
+          id,
+          profile_photo_filename
+            AS "profilePhotoFilename"
+        FROM users
+        WHERE id = $1
+          AND is_active = true
+        FOR UPDATE;
+        `,
+        [userId],
+      );
+
+    if (existingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    storedPhoto = await saveProfilePhoto(
+      req.file.buffer,
+    );
+
+    const result = await client.query(
+      `
+      UPDATE users
+      SET
+        profile_photo_filename = $1,
+        profile_photo_content_type = $2
+      WHERE id = $3
+        AND is_active = true
+      RETURNING
+        ${USER_RESPONSE_FIELDS};
+      `,
+      [
+        storedPhoto.filename,
+        storedPhoto.contentType,
+        userId,
+      ],
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    await deleteStoredProfilePhotoSafely(
+      existingResult.rows[0]
+        .profilePhotoFilename,
+      "profile photo replacement",
+    );
+
+    res.status(200).json({
+      user: result.rows[0],
+    });
+  } catch (error) {
+    const rollbackError =
+      transactionStarted
+        ? await rollbackSafely(client)
+        : null;
+
+    if (storedPhoto) {
+      await deleteStoredProfilePhotoSafely(
+        storedPhoto.filename,
+        "failed profile photo upload",
+      );
+    }
+
+    if (rollbackError) {
+      next(rollbackError);
+      return;
+    }
+
+    if (
+      error instanceof
+      ProfilePhotoStorageError
+    ) {
+      sendStorageError(error, res);
+      return;
+    }
+
+    next(error);
+  } finally {
+    client.release();
+  }
+}
+
+export async function getUserProfilePhotoFile(
+  req,
+  res,
+  next,
+) {
+  try {
+    const userId =
+      parsePositiveInteger(req.params.id);
+
+    if (!userId) {
+      return res.status(400).json({
+        error:
+          "id must be a positive integer",
+      });
+    }
+
+    const result = await query(
+      `
+      SELECT
+        profile_photo_filename
+          AS "profilePhotoFilename",
+        profile_photo_content_type
+          AS "profilePhotoContentType"
+      FROM users
+      WHERE id = $1
+        AND is_active = true;
+      `,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    const user = result.rows[0];
+
+    if (!user.profilePhotoFilename) {
+      return res.status(404).json({
+        error:
+          "Profile photo not found",
+      });
+    }
+
+    const photoBuffer =
+      await readProfilePhoto(
+        user.profilePhotoFilename,
+      );
+
+    if (!photoBuffer) {
+      return res.status(404).json({
+        error:
+          "Profile photo not found",
+      });
+    }
+
+    res.set({
+      "Cache-Control": "no-store",
+      "Content-Length":
+        String(photoBuffer.length),
+      "Content-Type":
+        user.profilePhotoContentType,
+      "X-Content-Type-Options":
+        "nosniff",
+    });
+
+    res.status(200).send(photoBuffer);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteCurrentUserProfilePhoto(
+  req,
+  res,
+  next,
+) {
+  const userId = getUserId(req);
+  const client = await pool.connect();
+
+  let transactionStarted = false;
+
+  try {
+    await client.query("BEGIN");
+    transactionStarted = true;
+
+    const existingResult =
+      await client.query(
+        `
+        SELECT
+          id,
+          profile_photo_filename
+            AS "profilePhotoFilename"
+        FROM users
+        WHERE id = $1
+          AND is_active = true
+        FOR UPDATE;
+        `,
+        [userId],
+      );
+
+    if (existingResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(404).json({
+        error: "User not found",
+      });
+    }
+
+    const existing =
+      existingResult.rows[0];
+
+    if (!existing.profilePhotoFilename) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+
+      return res.status(404).json({
+        error:
+          "Profile photo not found",
+      });
+    }
+
+    const result = await client.query(
+      `
+      UPDATE users
+      SET
+        profile_photo_filename = NULL,
+        profile_photo_content_type = NULL
+      WHERE id = $1
+        AND is_active = true
+      RETURNING
+        ${USER_RESPONSE_FIELDS};
+      `,
+      [userId],
+    );
+
+    await client.query("COMMIT");
+    transactionStarted = false;
+
+    await deleteStoredProfilePhotoSafely(
+      existing.profilePhotoFilename,
+      "profile photo deletion",
+    );
+
+    res.status(200).json({
+      user: result.rows[0],
+    });
+  } catch (error) {
+    const rollbackError =
+      transactionStarted
+        ? await rollbackSafely(client)
+        : null;
+
+    if (rollbackError) {
+      next(rollbackError);
+      return;
+    }
+
+    next(error);
+  } finally {
+    client.release();
+  }
+}
+
 export async function deactivateCurrentUser(
   req,
   res,
   next,
 ) {
   const client = await pool.connect();
+
+  let transactionStarted = false;
+  let profilePhotoFilename = null;
 
   try {
     const userId = getUserId(req);
@@ -538,12 +857,15 @@ export async function deactivateCurrentUser(
     }
 
     await client.query("BEGIN");
+    transactionStarted = true;
 
     const userResult = await client.query(
       `
       SELECT
         id,
-        password_hash
+        password_hash,
+        profile_photo_filename
+          AS "profilePhotoFilename"
       FROM users
       WHERE id = $1
         AND is_active = true
@@ -554,6 +876,7 @@ export async function deactivateCurrentUser(
 
     if (userResult.rows.length === 0) {
       await client.query("ROLLBACK");
+      transactionStarted = false;
 
       return res.status(404).json({
         error: "User not found",
@@ -567,6 +890,7 @@ export async function deactivateCurrentUser(
 
     if (!passwordMatches) {
       await client.query("ROLLBACK");
+      transactionStarted = false;
 
       return res.status(401).json({
         error: "Password is incorrect",
@@ -593,6 +917,7 @@ export async function deactivateCurrentUser(
 
     if (activeBookingResult.rows.length > 0) {
       await client.query("ROLLBACK");
+      transactionStarted = false;
 
       return res.status(409).json({
         error:
@@ -600,24 +925,45 @@ export async function deactivateCurrentUser(
       });
     }
 
+    profilePhotoFilename =
+      userResult.rows[0]
+        .profilePhotoFilename;
+
     await client.query(
       `
       UPDATE users
       SET
         is_active = false,
-        deactivated_at = NOW()
+        deactivated_at = NOW(),
+        profile_photo_filename = NULL,
+        profile_photo_content_type = NULL
       WHERE id = $1;
       `,
       [userId],
     );
 
     await client.query("COMMIT");
+    transactionStarted = false;
+
+    await deleteStoredProfilePhotoSafely(
+      profilePhotoFilename,
+      "account deactivation",
+    );
 
     res.status(200).json({
       message: "Account deactivated successfully",
     });
   } catch (error) {
-    await client.query("ROLLBACK");
+    const rollbackError =
+      transactionStarted
+        ? await rollbackSafely(client)
+        : null;
+
+    if (rollbackError) {
+      next(rollbackError);
+      return;
+    }
+
     next(error);
   } finally {
     client.release();
