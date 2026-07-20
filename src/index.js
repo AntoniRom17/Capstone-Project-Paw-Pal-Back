@@ -13,43 +13,19 @@ import bookingRoutes from "./routes/bookingRoutes.js";
 import reviewsRoutes from "./routes/reviewsRoutes.js";
 import messagesRoutes from "./routes/messagesRoutes.js";
 import backgroundChecksRoutes from "./routes/backgroundChecksRoutes.js";
+import uploadRoutes from "./routes/upload.js"; // added line
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const DATABASE_ERROR_RESPONSES = {
-  "22001": {
-    status: 400,
-    message: "A value exceeds the allowed length",
-  },
-  "22P02": {
-    status: 400,
-    message: "Invalid request data",
-  },
-  "23502": {
-    status: 400,
-    message: "A required value is missing",
-  },
-  "23503": {
-    status: 409,
-    message:
-      "The request conflicts with related data",
-  },
-  "23505": {
-    status: 409,
-    message:
-      "A record with those values already exists",
-  },
-  "23514": {
-    status: 400,
-    message:
-      "The request violates a data rule",
-  },
-  "23P01": {
-    status: 409,
-    message:
-      "The request conflicts with existing data",
-  },
+  22001: { status: 400, message: "A value exceeds the allowed length" },
+  "22P02": { status: 400, message: "Invalid request data" },
+  23502: { status: 400, message: "A required value is missing" },
+  23503: { status: 409, message: "The request conflicts with related data" },
+  23505: { status: 409, message: "A record with those values already exists" },
+  23514: { status: 400, message: "The request violates a data rule" },
+  "23P01": { status: 409, message: "The request conflicts with existing data" },
 };
 
 const PRODUCTION_ERROR_MESSAGES = {
@@ -74,36 +50,19 @@ function isPostgresError(error) {
 
 function getErrorResponse(error) {
   if (error?.type === "entity.parse.failed") {
-    return {
-      status: 400,
-      message:
-        "Request body contains invalid JSON",
-    };
+    return { status: 400, message: "Request body contains invalid JSON" };
   }
-
   if (error?.type === "entity.too.large") {
-    return {
-      status: 413,
-      message: "Request body is too large",
-    };
+    return { status: 413, message: "Request body is too large" };
   }
 
-  const databaseResponse =
-    DATABASE_ERROR_RESPONSES[error?.code];
+  const databaseResponse = DATABASE_ERROR_RESPONSES[error?.code];
+  if (databaseResponse) return databaseResponse;
 
-  if (databaseResponse) {
-    return databaseResponse;
-  }
-
-  if (isPostgresError(error)) {
-    return {
-      status: 500,
-      message: "Internal server error",
-    };
-  }
+  if (isPostgresError(error))
+    return { status: 500, message: "Internal server error" };
 
   const requestedStatus = Number(error?.status);
-
   const status =
     Number.isInteger(requestedStatus) &&
     requestedStatus >= 400 &&
@@ -111,57 +70,32 @@ function getErrorResponse(error) {
       ? requestedStatus
       : 500;
 
-  if (status >= 500) {
-    return {
-      status,
-      message: "Internal server error",
-    };
-  }
+  if (status >= 500) return { status, message: "Internal server error" };
 
   if (
     process.env.NODE_ENV !== "production" &&
     typeof error?.message === "string" &&
     error.message.trim()
   ) {
-    return {
-      status,
-      message: error.message,
-    };
+    return { status, message: error.message };
   }
 
   return {
     status,
-    message:
-      PRODUCTION_ERROR_MESSAGES[status] ||
-      "Request failed",
+    message: PRODUCTION_ERROR_MESSAGES[status] || "Request failed",
   };
 }
 
 app.use(
   cors({
-    origin:
-      process.env.CLIENT_URL ||
-      "http://localhost:5173",
+    origin: process.env.CLIENT_URL || "http://localhost:5173",
   }),
 );
 
-app.use(
-  express.json({
-    limit: "1mb",
-  }),
-);
-
+app.use(express.json({ limit: "1mb" }));
 app.use(morgan("dev"));
 
-app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    status: "ok",
-    message: "PawPal backend is running",
-    environment:
-      process.env.NODE_ENV || "development",
-  });
-});
-
+//  register routes
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRoutes);
 app.use("/api/services", servicesRoutes);
@@ -171,20 +105,26 @@ app.use("/api", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/messages", messagesRoutes);
-app.use(
-  "/api/background-checks",
-  backgroundChecksRoutes,
-);
+app.use("/api/background-checks", backgroundChecksRoutes);
+app.use("/api/upload", uploadRoutes); // 👈 added line
+
+// serve uploaded images
+app.use("/uploads", express.static("uploads")); // 👈 added line
+
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    message: "PawPal backend is running",
+    environment: process.env.NODE_ENV || "development",
+  });
+});
 
 app.use((req, res) => {
-  res.status(404).json({
-    error: "Route not found",
-  });
+  res.status(404).json({ error: "Route not found" });
 });
 
 app.use((error, req, res, next) => {
   const response = getErrorResponse(error);
-
   console.error("Unhandled request error", {
     method: req.method,
     path: req.originalUrl,
@@ -193,17 +133,12 @@ app.use((error, req, res, next) => {
     message: error?.message,
     stack: error?.stack,
   });
-
-  res.status(response.status).json({
-    error: response.message,
-  });
+  res.status(response.status).json({ error: response.message });
 });
 
 if (process.env.NODE_ENV !== "test") {
   app.listen(PORT, () => {
-    console.log(
-      `PawPal backend running on port ${PORT}`,
-    );
+    console.log(`PawPal backend running on port ${PORT}`);
   });
 }
 
