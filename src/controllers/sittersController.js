@@ -241,6 +241,8 @@ export const getSitters = async (
         u.city,
         u.state,
         u.zip_code AS "zipCode",
+        u.latitude,
+        u.longitude,
         (
           u.profile_photo_filename IS NOT NULL
         ) AS "hasProfilePhoto",
@@ -347,6 +349,8 @@ export const getSitterById = async (
         u.city,
         u.state,
         u.zip_code AS "zipCode",
+        u.latitude,
+        u.longitude,
         (
           u.profile_photo_filename IS NOT NULL
         ) AS "hasProfilePhoto",

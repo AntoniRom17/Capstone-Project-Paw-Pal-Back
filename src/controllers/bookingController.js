@@ -20,6 +20,7 @@ function mapBooking(row) {
     sitterServiceId: row.sitterServiceId,
     availabilityId: row.availabilityId,
     status: row.status,
+    cancelledByRole: row.cancelledByRole,
     totalPrice: row.totalPrice,
     date: row.date,
     startTime: row.startTime,
@@ -353,6 +354,7 @@ export async function getBookings(
         b.start_time AS "startTime",
         b.end_time AS "endTime",
         b.status,
+        b.cancelled_by_role AS "cancelledByRole",
         b.total_price AS "totalPrice",
         p.name AS "petName",
         o.name AS "ownerName",
@@ -469,6 +471,7 @@ export async function updateBookingStatus(
       "accepted",
       "declined",
       "completed",
+      "cancelled",
     ];
 
     const ownerMoves = ["cancelled"];
@@ -546,11 +549,18 @@ export async function updateBookingStatus(
       [booking.availability_id],
     );
 
+    const cancelledByRole =
+      normalizedStatus === "cancelled"
+        ? req.user.role
+        : null;
+
     const { rows } = await client.query(
       `
       UPDATE bookings
-      SET status = $1
-      WHERE id = $2
+      SET
+        status = $1,
+        cancelled_by_role = $2
+      WHERE id = $3
       RETURNING
         id,
         owner_id AS "ownerId",
@@ -561,6 +571,7 @@ export async function updateBookingStatus(
         availability_id
           AS "availabilityId",
         status,
+        cancelled_by_role AS "cancelledByRole",
         total_price AS "totalPrice",
         date,
         start_time AS "startTime",
@@ -568,6 +579,7 @@ export async function updateBookingStatus(
       `,
       [
         normalizedStatus,
+        cancelledByRole,
         bookingId,
       ],
     );
@@ -596,5 +608,142 @@ export async function updateBookingStatus(
     next(error);
   } finally {
     client.release();
+  }
+}
+
+export async function getBackupSitters(
+  req,
+  res,
+  next,
+) {
+  try {
+    const bookingId = parsePositiveInteger(
+      req.params.id,
+    );
+
+    if (!bookingId) {
+      return res.status(400).json({
+        error:
+          "id must be a positive integer",
+      });
+    }
+
+    const { rows: bookingRows } = await query(
+      `
+      SELECT
+        b.owner_id AS "ownerId",
+        b.sitter_id AS "sitterId",
+        b.status,
+        b.cancelled_by_role
+          AS "cancelledByRole",
+        b.date,
+        b.start_time AS "startTime",
+        b.end_time AS "endTime",
+        ss.service_id AS "serviceId"
+      FROM bookings b
+      JOIN sitter_services ss
+        ON ss.id = b.sitter_service_id
+      WHERE b.id = $1;
+      `,
+      [bookingId],
+    );
+
+    const booking = bookingRows[0];
+
+    if (!booking) {
+      return res.status(404).json({
+        error: "Booking not found",
+      });
+    }
+
+    if (booking.ownerId !== req.user.id) {
+      return res.status(403).json({
+        error:
+          "This booking does not belong to you",
+      });
+    }
+
+    if (
+      booking.status !== "cancelled" ||
+      booking.cancelledByRole !== "sitter"
+    ) {
+      return res.status(400).json({
+        error:
+          "Backup sitters are only available after a sitter cancels a confirmed booking",
+      });
+    }
+
+    const { rows } = await query(
+      `
+      SELECT
+        u.id,
+        u.name,
+        u.bio,
+        u.city,
+        u.state,
+        COALESCE(u.trust_score, 0)
+          AS "trustScore",
+        COALESCE(
+          (
+            SELECT ROUND(
+              AVG(reviews.rating)::numeric,
+              1
+            )::float
+            FROM bookings booking_history
+            JOIN reviews
+              ON reviews.booking_id =
+                booking_history.id
+            WHERE booking_history.sitter_id =
+              u.id
+          ),
+          0
+        ) AS "averageRating",
+        sitter_service.id
+          AS "sitterServiceId",
+        COALESCE(
+          sitter_service.price_override,
+          service.base_price
+        )::float AS price,
+        availability.id
+          AS "availabilityId",
+        availability.date,
+        availability.start_time
+          AS "startTime",
+        availability.end_time
+          AS "endTime"
+      FROM users u
+      JOIN sitter_services sitter_service
+        ON sitter_service.sitter_id = u.id
+        AND sitter_service.service_id = $1
+      JOIN services service
+        ON service.id =
+          sitter_service.service_id
+      JOIN availability
+        ON availability.sitter_id = u.id
+        AND availability.date = $2
+        AND availability.start_time = $3
+        AND availability.end_time = $4
+        AND availability.is_booked = false
+      WHERE u.role = 'sitter'
+        AND u.is_active = true
+        AND u.id != $5
+      ORDER BY
+        "trustScore" DESC,
+        "averageRating" DESC;
+      `,
+      [
+        booking.serviceId,
+        booking.date,
+        booking.startTime,
+        booking.endTime,
+        booking.sitterId,
+      ],
+    );
+
+    res.status(200).json({
+      backupSitters: rows,
+    });
+  } catch (error) {
+    next(error);
   }
 }

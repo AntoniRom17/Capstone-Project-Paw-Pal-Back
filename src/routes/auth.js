@@ -1,4 +1,5 @@
 import "dotenv/config";
+import crypto from "crypto";
 import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
@@ -13,6 +14,15 @@ import {
 import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
+
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
+
+function hashResetToken(token) {
+  return crypto
+    .createHash("sha256")
+    .update(token)
+    .digest("hex");
+}
 
 function makeToken(user) {
   if (!process.env.JWT_SECRET) {
@@ -221,5 +231,191 @@ router.put("/me", requireAuth, async (req, res, next) => {
     next(error);
   }
 });
+
+router.post(
+  "/forgot-password",
+  async (req, res, next) => {
+    try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json({
+          error:
+            "Request body must be a JSON object",
+        });
+      }
+
+      const { email } = req.body;
+
+      if (
+        email === undefined ||
+        !isValidEmail(email)
+      ) {
+        return res.status(400).json({
+          error:
+            "email must be a valid email address",
+        });
+      }
+
+      const normalizedEmail = email
+        .trim()
+        .toLowerCase();
+
+      const { rows } = await query(
+        `
+        SELECT id
+        FROM users
+        WHERE email = $1
+          AND is_active = true;
+        `,
+        [normalizedEmail],
+      );
+
+      const user = rows[0];
+      const responseBody = {
+        message:
+          "If an account exists for that email, a password reset link has been sent.",
+      };
+
+      if (user) {
+        const rawToken = crypto
+          .randomBytes(32)
+          .toString("hex");
+
+        const tokenHash =
+          hashResetToken(rawToken);
+
+        const expiresAt = new Date(
+          Date.now() +
+            PASSWORD_RESET_TTL_MS,
+        );
+
+        await query(
+          `
+          UPDATE users
+          SET
+            password_reset_token_hash = $1,
+            password_reset_expires_at = $2
+          WHERE id = $3;
+          `,
+          [
+            tokenHash,
+            expiresAt,
+            user.id,
+          ],
+        );
+
+        const clientUrl = (
+          process.env.CLIENT_URL ||
+          "http://localhost:5173"
+        ).replace(/\/+$/, "");
+
+        const resetLink = `${clientUrl}/reset-password?token=${rawToken}`;
+
+        // No email provider is configured for this project yet, so the
+        // reset link is logged (and, outside production, returned in the
+        // response) as a stand-in for actually emailing it.
+        console.log(
+          `Password reset link for ${normalizedEmail}: ${resetLink}`,
+        );
+
+        if (
+          process.env.NODE_ENV !==
+          "production"
+        ) {
+          responseBody.resetLink =
+            resetLink;
+        }
+      }
+
+      res.status(200).json(responseBody);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+router.post(
+  "/reset-password",
+  async (req, res, next) => {
+    try {
+      if (!isPlainObject(req.body)) {
+        return res.status(400).json({
+          error:
+            "Request body must be a JSON object",
+        });
+      }
+
+      const { token, password } = req.body;
+
+      if (
+        typeof token !== "string" ||
+        token.trim().length === 0
+      ) {
+        return res.status(400).json({
+          error: "token is required",
+        });
+      }
+
+      if (
+        typeof password !== "string" ||
+        password.trim().length === 0 ||
+        password.length < 8 ||
+        password.length > 128
+      ) {
+        return res.status(400).json({
+          error:
+            "password must be a string between 8 and 128 characters",
+        });
+      }
+
+      const tokenHash = hashResetToken(
+        token.trim(),
+      );
+
+      const { rows } = await query(
+        `
+        SELECT id
+        FROM users
+        WHERE password_reset_token_hash = $1
+          AND password_reset_expires_at > NOW()
+          AND is_active = true;
+        `,
+        [tokenHash],
+      );
+
+      const user = rows[0];
+
+      if (!user) {
+        return res.status(400).json({
+          error:
+            "This password reset link is invalid or has expired",
+        });
+      }
+
+      const passwordHash = await bcrypt.hash(
+        password,
+        10,
+      );
+
+      await query(
+        `
+        UPDATE users
+        SET
+          password_hash = $1,
+          password_reset_token_hash = NULL,
+          password_reset_expires_at = NULL
+        WHERE id = $2;
+        `,
+        [passwordHash, user.id],
+      );
+
+      res.status(200).json({
+        message:
+          "Password has been reset. You can now log in.",
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 export default router;

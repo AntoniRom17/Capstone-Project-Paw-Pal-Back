@@ -1,0 +1,7 @@
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS
+    latitude NUMERIC(9, 6);
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS
+    longitude NUMERIC(9, 6);

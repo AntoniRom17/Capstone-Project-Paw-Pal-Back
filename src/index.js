@@ -8,6 +8,7 @@ import usersRoutes from "./routes/usersRoutes.js";
 import servicesRoutes from "./routes/servicesRoutes.js";
 import sittersRoutes from "./routes/sittersRoutes.js";
 import petsRoutes from "./routes/petsRoutes.js";
+import petHealthRoutes from "./routes/petHealthRoutes.js";
 import availabilityRoutes from "./routes/availabilityRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
 import reviewsRoutes from "./routes/reviewsRoutes.js";
@@ -86,9 +87,14 @@ function getErrorResponse(error) {
   };
 }
 
+const LOCALHOST_ORIGIN = /^http:\/\/localhost:\d+$/;
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin:
+      process.env.NODE_ENV === "production"
+        ? process.env.CLIENT_URL
+        : process.env.CLIENT_URL || LOCALHOST_ORIGIN,
   }),
 );
 
@@ -101,6 +107,7 @@ app.use("/api/users", usersRoutes);
 app.use("/api/services", servicesRoutes);
 app.use("/api/sitters", sittersRoutes);
 app.use("/api/pets", petsRoutes);
+app.use("/api/pets", petHealthRoutes);
 app.use("/api", availabilityRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/reviews", reviewsRoutes);
