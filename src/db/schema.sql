@@ -6,8 +6,10 @@ DROP TABLE IF EXISTS bookings CASCADE;
 DROP TABLE IF EXISTS availability CASCADE;
 DROP TABLE IF EXISTS sitter_services CASCADE;
 DROP TABLE IF EXISTS services CASCADE;
+DROP TABLE IF EXISTS pet_vaccinations CASCADE;
 DROP TABLE IF EXISTS pets CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS schema_migrations CASCADE;
 
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
@@ -21,6 +23,8 @@ CREATE TABLE users (
   city VARCHAR(100) NOT NULL,
   state VARCHAR(2) NOT NULL,
   zip_code VARCHAR(10) NOT NULL,
+  latitude NUMERIC(9, 6),
+  longitude NUMERIC(9, 6),
   profile_photo_filename VARCHAR(255),
   profile_photo_content_type VARCHAR(50),
   trust_score INTEGER
@@ -39,6 +43,8 @@ CREATE TABLE users (
     CHECK (on_time_percentage BETWEEN 0 AND 100),
   is_active BOOLEAN NOT NULL DEFAULT true,
   deactivated_at TIMESTAMPTZ,
+  password_reset_token_hash TEXT,
+  password_reset_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT users_profile_photo_metadata_complete
     CHECK (
@@ -52,17 +58,18 @@ CREATE TABLE users (
         AND profile_photo_content_type IS NOT NULL
       )
     ),
-  CHECK (
-    (
-      is_active = true
-      AND deactivated_at IS NULL
+  CONSTRAINT users_active_deactivation_consistency
+    CHECK (
+      (
+        is_active = true
+        AND deactivated_at IS NULL
+      )
+      OR
+      (
+        is_active = false
+        AND deactivated_at IS NOT NULL
+      )
     )
-    OR
-    (
-      is_active = false
-      AND deactivated_at IS NOT NULL
-    )
-  )
 );
 
 CREATE TABLE pets (
@@ -76,6 +83,13 @@ CREATE TABLE pets (
   care_notes TEXT,
   photo_filename VARCHAR(255),
   photo_content_type VARCHAR(50),
+  vet_name VARCHAR(100),
+  vet_phone VARCHAR(20),
+  microchip_number VARCHAR(50),
+  weight_lbs NUMERIC(5, 1),
+  allergies TEXT,
+  medications TEXT,
+  spayed_neutered BOOLEAN,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT pets_photo_metadata_complete
     CHECK (
@@ -88,7 +102,23 @@ CREATE TABLE pets (
         photo_filename IS NOT NULL
         AND photo_content_type IS NOT NULL
       )
+    ),
+  CONSTRAINT pets_weight_lbs_check
+    CHECK (
+      weight_lbs IS NULL
+      OR weight_lbs > 0
     )
+);
+
+CREATE TABLE pet_vaccinations (
+  id SERIAL PRIMARY KEY,
+  pet_id INTEGER NOT NULL
+    REFERENCES pets(id) ON DELETE CASCADE,
+  vaccine_name VARCHAR(100) NOT NULL,
+  administered_date DATE NOT NULL,
+  expiration_date DATE,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE services (
@@ -162,6 +192,14 @@ CREATE TABLE bookings (
         'completed'
       )
     ),
+  cancelled_by_role VARCHAR(10)
+    CHECK (
+      cancelled_by_role IS NULL
+      OR cancelled_by_role IN (
+        'owner',
+        'sitter'
+      )
+    ),
   total_price NUMERIC(8, 2) NOT NULL
     CHECK (total_price >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -207,8 +245,14 @@ CREATE INDEX idx_users_active_sitter_location
     zip_code
   );
 
+CREATE INDEX idx_users_password_reset_token_hash
+  ON users (password_reset_token_hash);
+
 CREATE INDEX idx_pets_owner_id
   ON pets (owner_id);
+
+CREATE INDEX idx_pet_vaccinations_pet_id
+  ON pet_vaccinations (pet_id);
 
 CREATE INDEX idx_sitter_services_sitter_id
   ON sitter_services (sitter_id);

@@ -14,7 +14,6 @@ import bookingRoutes from "./routes/bookingRoutes.js";
 import reviewsRoutes from "./routes/reviewsRoutes.js";
 import messagesRoutes from "./routes/messagesRoutes.js";
 import backgroundChecksRoutes from "./routes/backgroundChecksRoutes.js";
-import uploadRoutes from "./routes/upload.js"; // added line
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,15 +52,19 @@ function getErrorResponse(error) {
   if (error?.type === "entity.parse.failed") {
     return { status: 400, message: "Request body contains invalid JSON" };
   }
+
   if (error?.type === "entity.too.large") {
     return { status: 413, message: "Request body is too large" };
   }
 
   const databaseResponse = DATABASE_ERROR_RESPONSES[error?.code];
-  if (databaseResponse) return databaseResponse;
+  if (databaseResponse) {
+    return databaseResponse;
+  }
 
-  if (isPostgresError(error))
+  if (isPostgresError(error)) {
     return { status: 500, message: "Internal server error" };
+  }
 
   const requestedStatus = Number(error?.status);
   const status =
@@ -71,7 +74,9 @@ function getErrorResponse(error) {
       ? requestedStatus
       : 500;
 
-  if (status >= 500) return { status, message: "Internal server error" };
+  if (status >= 500) {
+    return { status, message: "Internal server error" };
+  }
 
   if (
     process.env.NODE_ENV !== "production" &&
@@ -101,7 +106,6 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("dev"));
 
-//  register routes
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRoutes);
 app.use("/api/services", servicesRoutes);
@@ -113,10 +117,6 @@ app.use("/api/bookings", bookingRoutes);
 app.use("/api/reviews", reviewsRoutes);
 app.use("/api/messages", messagesRoutes);
 app.use("/api/background-checks", backgroundChecksRoutes);
-app.use("/api/upload", uploadRoutes); // 👈 added line
-
-// serve uploaded images
-app.use("/uploads", express.static("uploads")); // 👈 added line
 
 app.get("/api/health", (req, res) => {
   res.status(200).json({
@@ -132,6 +132,7 @@ app.use((req, res) => {
 
 app.use((error, req, res, next) => {
   const response = getErrorResponse(error);
+
   console.error("Unhandled request error", {
     method: req.method,
     path: req.originalUrl,
@@ -140,6 +141,7 @@ app.use((error, req, res, next) => {
     message: error?.message,
     stack: error?.stack,
   });
+
   res.status(response.status).json({ error: response.message });
 });
 
