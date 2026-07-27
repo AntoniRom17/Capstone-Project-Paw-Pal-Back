@@ -75,6 +75,232 @@ const DEMO_USERS = [
 
 const DEMO_EMAILS = DEMO_USERS.map((user) => user.email);
 
+const DEMO_AVAILABILITY = [
+  {
+    sitterEmail: "sarah@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "08:30", endTime: "09:00" },
+      { dayOffset: 3, startTime: "13:00", endTime: "14:00" },
+      { dayOffset: 5, startTime: "17:30", endTime: "18:00" },
+    ],
+  },
+  {
+    sitterEmail: "jordan@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "11:00", endTime: "12:00" },
+      { dayOffset: 2, startTime: "15:00", endTime: "16:00" },
+      { dayOffset: 4, startTime: "09:00", endTime: "10:00" },
+    ],
+  },
+  {
+    sitterEmail: "luis@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "06:30", endTime: "07:00" },
+      { dayOffset: 3, startTime: "17:00", endTime: "18:00" },
+      { dayOffset: 6, startTime: "07:30", endTime: "08:00" },
+    ],
+  },
+  {
+    sitterEmail: "emily@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "09:00", endTime: "10:00" },
+      { dayOffset: 3, startTime: "14:00", endTime: "15:00" },
+      { dayOffset: 5, startTime: "18:00", endTime: "19:00" },
+    ],
+  },
+  {
+    sitterEmail: "marcus@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "07:30", endTime: "08:30" },
+      { dayOffset: 3, startTime: "12:00", endTime: "13:00" },
+      { dayOffset: 5, startTime: "16:00", endTime: "17:00" },
+    ],
+  },
+  {
+    sitterEmail: "aisha@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "10:00", endTime: "11:00" },
+      { dayOffset: 3, startTime: "13:00", endTime: "14:00" },
+      { dayOffset: 5, startTime: "15:30", endTime: "16:30" },
+    ],
+  },
+  {
+    sitterEmail: "daniel@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "06:00", endTime: "07:00" },
+      { dayOffset: 3, startTime: "17:30", endTime: "18:30" },
+      { dayOffset: 5, startTime: "07:00", endTime: "08:00" },
+    ],
+  },
+  {
+    sitterEmail: "grace@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "09:30", endTime: "10:30" },
+      { dayOffset: 3, startTime: "18:00", endTime: "19:00" },
+      { dayOffset: 5, startTime: "11:00", endTime: "12:00" },
+    ],
+  },
+  {
+    sitterEmail: "olivia@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "10:30", endTime: "11:30" },
+      { dayOffset: 3, startTime: "14:30", endTime: "15:30" },
+      { dayOffset: 5, startTime: "16:30", endTime: "17:30" },
+    ],
+  },
+  {
+    sitterEmail: "ben@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "08:00", endTime: "09:00" },
+      { dayOffset: 3, startTime: "12:30", endTime: "13:30" },
+      { dayOffset: 5, startTime: "15:00", endTime: "16:00" },
+    ],
+  },
+  {
+    sitterEmail: "nadia@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "11:00", endTime: "12:00" },
+      { dayOffset: 3, startTime: "15:00", endTime: "16:00" },
+      { dayOffset: 5, startTime: "18:30", endTime: "19:30" },
+    ],
+  },
+  {
+    sitterEmail: "tyler@example.com",
+    slots: [
+      { dayOffset: 1, startTime: "07:00", endTime: "08:00" },
+      { dayOffset: 3, startTime: "16:00", endTime: "17:00" },
+      { dayOffset: 5, startTime: "19:00", endTime: "20:00" },
+    ],
+  },
+];
+
+const DEMO_CONVERSATIONS = [
+  {
+    ownerEmail: "maya@example.com",
+    sitterEmail: "sarah@example.com",
+    petName: "Luna",
+    bookingStatus: "accepted",
+    messages: [
+      {
+        senderRole: "owner",
+        body: "Hi Sarah! Luna's food and treats will be packed by the front door.",
+        minutesAgo: 95,
+        isRead: true,
+      },
+      {
+        senderRole: "sitter",
+        body: "Perfect, thank you! I also made a note about her chicken allergy.",
+        minutesAgo: 80,
+        isRead: true,
+      },
+      {
+        senderRole: "owner",
+        body: "That is great. She usually settles in after a short walk.",
+        minutesAgo: 55,
+        isRead: true,
+      },
+      {
+        senderRole: "sitter",
+        body: "Sounds good! I am looking forward to spending time with Luna.",
+        minutesAgo: 20,
+        isRead: false,
+      },
+    ],
+  },
+  {
+    ownerEmail: "maya@example.com",
+    sitterEmail: "jordan@example.com",
+    petName: "Luna",
+    bookingStatus: "cancelled",
+    messages: [
+      {
+        senderRole: "owner",
+        body: "Hi Jordan, my plans changed and I need to cancel Luna's stay.",
+        minutesAgo: 310,
+        isRead: true,
+      },
+      {
+        senderRole: "sitter",
+        body: "No problem at all. Thanks for letting me know early.",
+        minutesAgo: 285,
+        isRead: true,
+      },
+    ],
+  },
+  {
+    ownerEmail: "maya@example.com",
+    sitterEmail: "sarah@example.com",
+    petName: "Rocky",
+    bookingStatus: "completed",
+    messages: [
+      {
+        senderRole: "owner",
+        body: "Rocky is ready for his walk. His treats are in the blue jar.",
+        minutesAgo: 1520,
+        isRead: true,
+      },
+      {
+        senderRole: "sitter",
+        body: "We had a great walk! Rocky did well and is relaxing at home.",
+        minutesAgo: 1450,
+        isRead: true,
+      },
+      {
+        senderRole: "owner",
+        body: "Thank you for the update and for taking such good care of him!",
+        minutesAgo: 1425,
+        isRead: true,
+      },
+    ],
+  },
+  {
+    ownerEmail: "james@example.com",
+    sitterEmail: "jordan@example.com",
+    petName: "Mochi",
+    bookingStatus: "pending",
+    messages: [
+      {
+        senderRole: "owner",
+        body: "Hi Jordan, Mochi may hide at first. Is that okay for the overnight stay?",
+        minutesAgo: 125,
+        isRead: true,
+      },
+      {
+        senderRole: "sitter",
+        body: "Absolutely. I will give Mochi plenty of quiet space and let him approach me.",
+        minutesAgo: 70,
+        isRead: false,
+      },
+    ],
+  },
+  {
+    ownerEmail: "priya@example.com",
+    sitterEmail: "luis@example.com",
+    petName: "Biscuit",
+    bookingStatus: "completed",
+    messages: [
+      {
+        senderRole: "owner",
+        body: "Biscuit had his arthritis medication at 5 PM and is ready for his walk.",
+        minutesAgo: 4400,
+        isRead: true,
+      },
+      {
+        senderRole: "sitter",
+        body: "Thanks! We kept an easy pace and Biscuit was happy the whole time.",
+        minutesAgo: 4330,
+        isRead: true,
+      },
+      {
+        senderRole: "owner",
+        body: "Wonderful, thank you Luis!",
+        minutesAgo: 4300,
+        isRead: true,
+      },
+    ],
+  },
+];
+
 async function getExistingDemoAccountCount(client) {
   const { rows } = await client.query(
     `
@@ -226,6 +452,48 @@ async function insertAvailability(
   return rows[0];
 }
 
+async function seedRollingDemoAvailability(client) {
+  let insertedAvailabilityCount = 0;
+
+  for (const sitterSchedule of DEMO_AVAILABILITY) {
+    for (const slot of sitterSchedule.slots) {
+      const result = await client.query(
+        `
+        INSERT INTO availability (
+          sitter_id,
+          date,
+          start_time,
+          end_time,
+          is_booked
+        )
+        SELECT
+          users.id,
+          CURRENT_DATE + $2::integer,
+          $3,
+          $4,
+          false
+        FROM users
+        WHERE users.email = $1
+          AND users.role = 'sitter'
+          AND users.is_active = true
+        ON CONFLICT DO NOTHING
+        RETURNING id;
+        `,
+        [
+          sitterSchedule.sitterEmail,
+          slot.dayOffset,
+          slot.startTime,
+          slot.endTime,
+        ],
+      );
+
+      insertedAvailabilityCount += result.rowCount;
+    }
+  }
+
+  return insertedAvailabilityCount;
+}
+
 async function insertBooking(
   client,
   {
@@ -310,6 +578,141 @@ async function insertReview(
   );
 }
 
+async function seedDemoMessages(client) {
+  let insertedMessageCount = 0;
+
+  for (const conversation of DEMO_CONVERSATIONS) {
+    const { rows: bookingRows } = await client.query(
+      `
+      SELECT
+        bookings.id AS "bookingId",
+        bookings.owner_id AS "ownerId",
+        bookings.sitter_id AS "sitterId"
+      FROM bookings
+      JOIN users owner_user
+        ON owner_user.id = bookings.owner_id
+      JOIN users sitter_user
+        ON sitter_user.id = bookings.sitter_id
+      JOIN pets
+        ON pets.id = bookings.pet_id
+      WHERE owner_user.email = $1
+        AND sitter_user.email = $2
+        AND pets.name = $3
+        AND bookings.status = $4
+      ORDER BY bookings.id DESC
+      LIMIT 1;
+      `,
+      [
+        conversation.ownerEmail,
+        conversation.sitterEmail,
+        conversation.petName,
+        conversation.bookingStatus,
+      ],
+    );
+
+    const booking = bookingRows[0];
+
+    if (!booking) {
+      continue;
+    }
+
+    for (const message of conversation.messages) {
+      const senderId =
+        message.senderRole === "owner"
+          ? booking.ownerId
+          : booking.sitterId;
+      const recipientId =
+        message.senderRole === "owner"
+          ? booking.sitterId
+          : booking.ownerId;
+
+      const result = await client.query(
+        `
+        INSERT INTO messages (
+          booking_id,
+          sender_id,
+          recipient_id,
+          body,
+          read_at,
+          created_at
+        )
+        SELECT
+          $1,
+          $2,
+          $3,
+          $4,
+          CASE
+            WHEN $6::boolean THEN NOW()
+            ELSE NULL
+          END,
+          NOW() - ($5::integer * INTERVAL '1 minute')
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM messages
+          WHERE booking_id = $1
+            AND sender_id = $2
+            AND recipient_id = $3
+            AND body = $4
+        );
+        `,
+        [
+          booking.bookingId,
+          senderId,
+          recipientId,
+          message.body,
+          message.minutesAgo,
+          message.isRead,
+        ],
+      );
+
+      insertedMessageCount += result.rowCount;
+    }
+  }
+
+  const starterMessageResult = await client.query(
+    `
+    INSERT INTO messages (
+      booking_id,
+      sender_id,
+      recipient_id,
+      body,
+      created_at
+    )
+    SELECT
+      bookings.id,
+      bookings.sitter_id,
+      bookings.owner_id,
+      CONCAT(
+        'Hi ',
+        SPLIT_PART(owner_user.name, ' ', 1),
+        '! I am looking forward to caring for ',
+        pets.name,
+        '. You can send any care details or questions here.'
+      ),
+      NOW() - INTERVAL '5 minutes'
+    FROM bookings
+    JOIN users owner_user
+      ON owner_user.id = bookings.owner_id
+    JOIN users sitter_user
+      ON sitter_user.id = bookings.sitter_id
+    JOIN pets
+      ON pets.id = bookings.pet_id
+    WHERE owner_user.email = ANY($1::text[])
+      AND sitter_user.email = ANY($1::text[])
+      AND NOT EXISTS (
+        SELECT 1
+        FROM messages
+        WHERE messages.booking_id = bookings.id
+      );
+    `,
+    [DEMO_EMAILS],
+  );
+
+  insertedMessageCount += starterMessageResult.rowCount;
+
+  return insertedMessageCount;
+}
+
 async function seed() {
   const client = await pool.connect();
   let transactionStarted = false;
@@ -322,10 +725,33 @@ async function seed() {
       await getExistingDemoAccountCount(client);
 
     if (existingDemoAccountCount === DEMO_USERS.length) {
+      const insertedAvailabilityCount =
+        await seedRollingDemoAvailability(client);
+      const insertedMessageCount =
+        await seedDemoMessages(client);
+
       await client.query("COMMIT");
       transactionStarted = false;
 
-      console.log("Demo data is already seeded. No changes were made.");
+      if (insertedMessageCount > 0) {
+        console.log(
+          `Added ${insertedMessageCount} demo messages to existing bookings.`,
+        );
+      }
+
+      if (insertedAvailabilityCount > 0) {
+        console.log(
+          `Added ${insertedAvailabilityCount} fresh demo availability slots.`,
+        );
+      }
+
+      if (
+        insertedMessageCount === 0
+        && insertedAvailabilityCount === 0
+      ) {
+        console.log("Demo data is already seeded. No changes were made.");
+      }
+
       console.log(`Demo account password: ${DEMO_PASSWORD}`);
       return;
     }
@@ -588,6 +1014,11 @@ async function seed() {
       status: "cancelled",
     });
 
+    const insertedAvailabilityCount =
+      await seedRollingDemoAvailability(client);
+    const insertedMessageCount =
+      await seedDemoMessages(client);
+
     await insertReview(client, {
       bookingId: sarahCompletedBooking,
       reviewerId: maya.id,
@@ -620,6 +1051,10 @@ async function seed() {
     transactionStarted = false;
 
     console.log("Database seeded successfully.");
+    console.log(
+      `Fresh demo availability slots added: ${insertedAvailabilityCount}`,
+    );
+    console.log(`Demo messages added: ${insertedMessageCount}`);
     console.log(`Demo account password: ${DEMO_PASSWORD}`);
   } catch (error) {
     if (transactionStarted) {
